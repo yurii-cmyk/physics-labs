@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Коло змінного струму з резистивним навантаженням</title>
+</head>
+<body>
+<div id="app"></div>
+<style>
+#app, #app * { box-sizing: border-box; font-family: "Segoe UI", Tahoma, Arial, sans-serif; }
+#app {
+  background:#d9d9d9;
+  padding:14px;
+  border-radius:6px;
+  color:#111;
+  max-width:100%;
+}
+.toprow{
+  display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+  margin-bottom:10px; font-size:13px;
+}
+.toprow input[type=text]{
+  padding:5px 8px; border:1px solid #999; border-radius:3px; font-size:13px; width:220px;
+}
+#groupId{ width:64px; }
+.btn{
+  padding:6px 12px; border:1px solid #6b6b6b; border-radius:3px; background:linear-gradient(#fdfdfd,#e2e2e2);
+  cursor:pointer; font-size:13px;
+}
+.btn:hover{ background:linear-gradient(#f5f5f5,#d5d5d5); }
+.btn:active{ background:#cfcfcf; }
+.gear{
+  margin-left:auto; width:30px;height:30px;border-radius:50%;border:1px solid #999;
+  background:#efefef;cursor:pointer;font-size:15px;display:flex;align-items:center;justify-content:center;
+}
+.win{
+  background:#efefef; border:1px solid #8a8a8a; border-radius:2px; margin-bottom:10px;
+  box-shadow:1px 1px 4px rgba(0,0,0,.25);
+}
+.titlebar{
+  background:linear-gradient(#f7f7f7,#dcdcdc); border-bottom:1px solid #b9b9b9;
+  padding:4px 8px; font-size:12px; display:flex; align-items:center; gap:6px;
+}
+.titlebar .ico{width:12px;height:12px;background:#4a76c9;display:inline-block;border-radius:2px;}
+.titlebar .name{flex:1;}
+.titlebar .win-btn{width:16px;height:14px;border:1px solid #aaa;background:#f2f2f2;text-align:center;font-size:9px;line-height:13px;margin-left:2px;}
+.plotwrap{ position:relative; background:#f0f0f0; }
+canvas{ display:block; width:100%; height:auto; cursor:crosshair; touch-action:none; }
+.readout{
+  position:absolute; top:6px; left:10px; font-weight:bold; font-size:14px; pointer-events:none;
+}
+.readout.v{ color:#1a56db; }
+.readout.i{ color:#d81c1c; }
+.points-panel{
+  background:#efefef;border:1px solid #8a8a8a;border-radius:2px;padding:10px;margin-top:4px;
+}
+.points-panel table{ border-collapse:collapse; width:100%; font-size:12.5px; margin-top:6px;}
+.points-panel th,.points-panel td{ border:1px solid #bbb; padding:3px 8px; text-align:right; }
+.points-panel th{ background:#dcdcdc; }
+.ptools{ display:flex; gap:8px; align-items:center; }
+.regime-tag{ font-size:12px; color:#555; margin-left:6px; }
+.modal-bg{
+  position:fixed; inset:0; background:rgba(0,0,0,.4); display:flex; align-items:center; justify-content:center; z-index:50;
+}
+.modal{
+  background:#f4f4f4; border:1px solid #888; border-radius:6px; padding:18px 20px; width:min(92vw,480px);
+  max-height:85vh; overflow:auto;
+}
+.modal h3{ margin:0 0 10px 0; font-size:15px; }
+.row2{ display:grid; grid-template-columns:1fr 1fr; gap:8px 10px; margin-bottom:8px; }
+.row2 label{ font-size:12px; color:#333; display:block; margin-bottom:2px; }
+.row2 input{ width:100%; padding:4px 6px; border:1px solid #999; border-radius:3px; font-size:13px; }
+.modal .actions{ display:flex; gap:8px; justify-content:flex-end; margin-top:12px; }
+.small{ font-size:11.5px; color:#666; }
+.resulttable{ width:100%; border-collapse:collapse; font-size:11.5px; margin-top:8px; }
+.resulttable th, .resulttable td{ border:1px solid #ccc; padding:3px 6px; }
+.resulttable th{ background:#e2e2e2; }
+</style>
+
+<script>
+(function(){
+
+const CFG_KEY = "phase-config";
+const RESULTS_PREFIX = "phase-result:";
+const ANSWERS_PREFIX = "phase-answer:";
+const ADC_BITS = 16; // роздільна здатність приладу — константа двигуна, не параметр задачі
+const PERIODS_MIN = 2, PERIODS_MAX = 10; // скільки періодів вміщується в кадрі (нецілим числом)
+const SHEET_KEY = "phase-trainer-v1"; // фільтр випадкових POST-запитів до Apps Script (не пароль)
+
+const DEFAULT_CFG = {
+  Vmin:2,  Vmax:10,      // В (амплітуда напруги)
+  Imin:5,  Imax:100,     // мА (амплітуда струму)
+  fmin:5,  fmax:100,     // Гц
+  phaseTol:10,           // ° — допуск при звірці початкових фаз
+  endpoint:"",           // Apps Script Web App URL (…/exec)
+  key:"teacher123"       // ключ доступу до налаштувань і перегляду параметрів
+};
+
+let cfg = null;
+let studentId = "";
+let studentGroup = "";
+let params = null;      // {V0,I0,f,phiV}
+let sim = null;         // {t,V,I,omega,f,T,phiV,phiI,R,P0,PT,tMax}
+let pinned = [];         // pinned points {t,V,I}
+let cursorIdx = null;
+let teacherMode = false; // true після введення правильного ключа в цьому сеансі
+let peekOpen = false;    // whether current-experiment params box is expanded
+
+const root = document.getElementById('app');
+
+// ---------- deterministic RNG from string ----------
+function hashStr(str){
+  let h = 2166136261;
+  for(let i=0;i<str.length;i++){
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+function mulberry32(seed){
+  return function(){
+    seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function rangeVal(rng, min, max){ return min + rng()*(max-min); }
+
+// приймає і "," і "." як десятковий роздільник (типова плутанина для укр. локалі)
+function parseNum(str){
+  if (str==null) return NaN;
+  return parseFloat(String(str).trim().replace(',', '.'));
+}
+
+// ---------- модель 16-бітного АЦП: ±1–2 МЗР дитер, не довільний % амплітуди ----------
+function quantizeADC(value, fullScaleRange, rng){
+  const levels = Math.pow(2, ADC_BITS) - 1;
+  const lsb = (2*fullScaleRange) / levels;
+  const ditherLSB = rng ? (rng()*4 - 2) : 0;
+  let v = value + ditherLSB*lsb;
+  v = Math.max(-fullScaleRange, Math.min(fullScaleRange, v));
+  return Math.round(v/lsb)*lsb;
+}
+
+function generateParams(id, c){
+  const base = hashStr(id.trim().toLowerCase());
+  const rngV = mulberry32(base ^ 0x1111);
+  const rngI = mulberry32(base ^ 0x2222);
+  const rngF = mulberry32(base ^ 0x3333);
+  const rngPhiV = mulberry32(base ^ 0x4444);
+  const rngPeriods = mulberry32(base ^ 0x7777);
+  const adcRng = mulberry32(base ^ 0x6666);
+  let periods = rangeVal(rngPeriods, PERIODS_MIN, PERIODS_MAX);
+  const frac = periods - Math.floor(periods);
+  if (frac < 0.1 || frac > 0.9) periods += 0.35; // уникаємо кадру з майже цілою кількістю періодів
+  if (periods >= PERIODS_MAX) periods -= 1;
+  return {
+    V0: rangeVal(rngV, c.Vmin, c.Vmax),
+    I0: rangeVal(rngI, c.Imin, c.Imax) * 1e-3, // -> A
+    f:  rangeVal(rngF, c.fmin, c.fmax),
+    phiV: rangeVal(rngPhiV, 0, 360),           // °, початкова фаза (спільна для U і I)
+    periods,
+    adcRng
+  };
+}
+
+// ---------- physics (усталений гармонічний режим, без перехідних процесів) ----------
+function simulate(p){
+  const {V0,I0,f,phiV,periods} = p;
+  const omega = 2*Math.PI*f;
+  const phiV_rad = phiV*Math.PI/180;
+  const phiI = phiV;
+  const phiI_rad = phiV_rad;
+  const T = 1/f;
+  const tMax = periods*T;
+  const N = 1600;
+  const dt = tMax/N;
+  const Vfs = cfg.Vmax*1.2;          // В, повна шкала вольтметра
+  const Ifs = cfg.Imax*1.2*1e-3;     // А, повна шкала амперметра
+  const t = new Array(N+1), V = new Array(N+1), I = new Array(N+1);
+  for(let i=0;i<=N;i++){
+    const ti = i*dt;
+    t[i] = ti;
+    const Vraw = V0*Math.sin(omega*ti + phiV_rad);
+    const Iraw = I0*Math.sin(omega*ti + phiI_rad);
+    V[i] = quantizeADC(Vraw, Vfs, p.adcRng);
+    I[i] = quantizeADC(Iraw, Ifs, p.adcRng);
+  }
+  const R  = V0/I0;          // Ом
+  const P0 = V0*I0;          // Вт, амплітудне (пікове) значення миттєвої потужності Pm = Um·Im
+  const PT = 0.5*V0*I0;      // Вт, середнє значення миттєвої потужності Pt = Um·Im/2 = Urms·Irms (Δφ=0)
+  return {t,V,I,omega,f,T,phiV,phiI,R,P0,PT,periods,tMax};
+}
+
+function angDiff(a,b){
+  let d = Math.abs(a-b) % 360;
+  if (d>180) d = 360-d;
+  return d;
+}
+
+// ---------- in-app toast (no console.error, so the platform's debug console never pops up) ----------
+function showToast(msg, isError){
+  let box = document.getElementById('appToast');
+  if (!box){
+    box = document.createElement('div');
+    box.id = 'appToast';
+    box.style.cssText = 'position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:999;'+
+      'padding:8px 16px;border-radius:5px;font-size:13px;max-width:90vw;box-shadow:0 2px 8px rgba(0,0,0,.3);'+
+      'transition:opacity .3s;';
+    document.body.appendChild(box);
+  }
+  box.style.background = isError ? '#c0392b' : '#2d7a2d';
+  box.style.color = '#fff';
+  box.textContent = msg;
+  box.style.opacity = '1';
+  clearTimeout(box._hideTimer);
+  box._hideTimer = setTimeout(()=>{ box.style.opacity='0'; }, 4000);
+}
+
+// ---------- сховище: window.storage (Claude-артефакт) з fallback на localStorage
+// (для автономних .html файлів, відкритих прямо у браузері, де window.storage немає) ----------
+const LS_PREFIX = 'phase-sim:';
+const hasArtifactStorage = (typeof window.storage !== 'undefined' && window.storage !== null);
+
+async function storageGet(key){
+  if (hasArtifactStorage) return await window.storage.get(key, true);
+  const raw = localStorage.getItem(LS_PREFIX+key);
+  return raw!=null ? {key, value:raw, shared:false} : null;
+}
+async function storageSet(key, value){
+  if (hasArtifactStorage) return await window.storage.set(key, value, true);
+  localStorage.setItem(LS_PREFIX+key, value);
+  return {key, value, shared:false};
+}
+async function storageList(prefix){
+  if (hasArtifactStorage) return await window.storage.list(prefix, true);
+  const keys = [];
+  for(let i=0;i<localStorage.length;i++){
+    const k = localStorage.key(i);
+    if (k && k.startsWith(LS_PREFIX+prefix)) keys.push(k.slice(LS_PREFIX.length));
+  }
+  return {keys};
+}
+
+// ---------- storage helpers ----------
+async function loadConfig(){
+  try{
+    const r = await storageGet(CFG_KEY);
+    cfg = r ? {...DEFAULT_CFG, ...JSON.parse(r.value)} : {...DEFAULT_CFG};
+  }catch(e){ cfg = {...DEFAULT_CFG}; }
+}
+async function saveConfig(newCfg){
+  cfg = newCfg;
+  try{
+    await storageSet(CFG_KEY, JSON.stringify(cfg));
+    return true;
+  }catch(e){
+    showToast('Не вдалося зберегти налаштування. Перевірте зʼєднання і спробуйте ще раз.', true);
+    return false;
+  }
+}
+async function saveResult(id, p, s){
+  try{
+    await storageSet(RESULTS_PREFIX+id, JSON.stringify({
+      id, group:studentGroup, V0:p.V0, I0:p.I0, f:p.f, T:s.T,
+      phiV:s.phiV, phiI:s.phiI, R:s.R, P0:s.P0, PT:s.PT,
+      ts: Date.now()
+    }));
+    return true;
+  }catch(e){
+    showToast('Не вдалося зберегти результат вимірювання. Спробуйте «Почати вимірювання» ще раз.', true);
+    return false;
+  }
+}
+async function saveAnswer(id, ans){
+  try{
+    await storageSet(ANSWERS_PREFIX+id, JSON.stringify({
+      id, f: ans.f, T: ans.T, U0: ans.U0, I0: ans.I0,
+      R: ans.R, P0: ans.P0, PT: ans.PT, phiV: ans.phiV, phiI: ans.phiI,
+      submittedAt: Date.now()
+    }));
+    return true;
+  }catch(e){
+    showToast('Не вдалося надіслати відповідь. Спробуйте ще раз.', true);
+    return false;
+  }
+}
+// надсилання відповіді + еталонних значень у Google Таблицю викладача (Apps Script Web App)
+async function sendToSheet(ans){
+  if (!cfg.endpoint) return; // не налаштовано — мовчки пропускаємо, локальне збереження вище вже відпрацювало
+  const payload = {
+    key: SHEET_KEY,
+    studentId: studentId,
+    group: studentGroup,
+    f_ref: sim.f,        f_ans: isNaN(ans.f) ? null : ans.f,
+    T_ref: sim.T,        T_ans: isNaN(ans.T) ? null : ans.T,
+    U0_ref: params.V0,   U0_ans: isNaN(ans.U0) ? null : ans.U0,
+    I0_ref: params.I0*1000, I0_ans: isNaN(ans.I0) ? null : ans.I0,
+    P0_ref: sim.P0,      P0_ans: isNaN(ans.P0) ? null : ans.P0,
+    PT_ref: sim.PT,      PT_ans: isNaN(ans.PT) ? null : ans.PT,
+    R_ref: sim.R,        R_ans: isNaN(ans.R) ? null : ans.R,
+    phiV_ref: sim.phiV,  phiV_ans: isNaN(ans.phiV) ? null : ans.phiV,
+    phiI_ref: sim.phiI,  phiI_ans: isNaN(ans.phiI) ? null : ans.phiI
+  };
+  try{
+    // Apps Script Web App не повертає CORS-заголовків, тому відповідь непрозора
+    // (mode:'no-cors') — можна підтвердити лише факт відправки, не успіх на сервері.
+    await fetch(cfg.endpoint, {
+      method:'POST', mode:'no-cors',
+      headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body: JSON.stringify(payload)
+    });
+    showToast('Результат надіслано у таблицю викладача.', false);
+  }catch(e){
+    showToast('Не вдалося з\u2019єднатися з таблицею викладача. Відповідь збережено локально — повідомте викладача.', true);
+  }
+}
+async function loadAnswer(id){
+  try{
+    const r = await storageGet(ANSWERS_PREFIX+id);
+    return r ? JSON.parse(r.value) : null;
+  }catch(e){ return null; }
+}
+async function loadAllResults(){
+  try{
+    const list = await storageList(RESULTS_PREFIX);
+    if (!list || !list.keys) return [];
+    const out = [];
+    for(const k of list.keys){
+      try{
+        const r = await storageGet(k);
+        if (r) out.push(JSON.parse(r.value));
+      }catch(e){}
+    }
+    for(const item of out){
+      item.answer = await loadAnswer(item.id);
+    }
+    return out.sort((a,b)=> (a.group||'').localeCompare(b.group||'') || a.id.localeCompare(b.id));
+  }catch(e){ return []; }
+}
+
+function niceNum(range, round){
+  const exp = Math.floor(Math.log10(range));
+  const f = range/Math.pow(10,exp);
+  let nf;
+  if (round){
+    if (f<1.5) nf=1; else if (f<3) nf=2; else if (f<7) nf=5; else nf=10;
+  } else {
+    if (f<=1) nf=1; else if (f<=2) nf=2; else if (f<=5) nf=5; else nf=10;
+  }
+  return nf*Math.pow(10,exp);
+}
+
+// ---------- зум (спільний для обох панелей — один і той самий діапазон індексів) ----------
+let zoomLo = 0, zoomHi = null; // null hi = повний діапазон (без зуму)
+let dragging = false, dragStartIdx = null, dragCurIdx = null, dragStartClientX = null;
+
+function zoomRange(){
+  if (!sim) return [0,0];
+  return zoomHi!=null ? [zoomLo, zoomHi] : [0, sim.t.length-1];
+}
+function resetZoom(){ zoomLo = 0; zoomHi = null; redraw(); }
+function pixelToIdx(canvas, clientX){
+  const rect = canvas.getBoundingClientRect();
+  const xRatio = (clientX-rect.left)/rect.width;
+  const padL=48/1600, padR=14/1600;
+  const usable = 1-padL-padR;
+  let frac = (xRatio-padL)/usable;
+  frac = Math.min(1, Math.max(0, frac));
+  const [lo,hi] = zoomRange();
+  return Math.round(lo + frac*(hi-lo));
+}
+
+// ---------- drawing ----------
+function drawPanel(canvas, tArr, yArr, opts){
+  const W = canvas.width, H = canvas.height;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle = "#f0f0f0";
+  ctx.fillRect(0,0,W,H);
+
+  const padL=48, padR=14, padT=14, padB=26;
+  const plotW = W-padL-padR, plotH = H-padT-padB;
+
+  const lo = opts.lo ?? 0, hi = opts.hi ?? (tArr.length-1);
+  const tMin = tArr[lo], tMaxV = tArr[hi];
+  const tSpan = (tMaxV-tMin) || 1;
+
+  let yMax = 0;
+  for(let i=lo;i<=hi;i++){ const a=Math.abs(yArr[i]); if(a>yMax) yMax=a; }
+  yMax *= 1.15;
+  if (yMax===0) yMax=1;
+
+  const xToPx = t => padL + ((t-tMin)/tSpan)*plotW;
+  const yToPx = v => padT + plotH/2 - (v/yMax)*(plotH/2);
+
+  // gridlines
+  ctx.strokeStyle = "#d3d3d3"; ctx.lineWidth=1;
+  ctx.font = "10px Tahoma"; ctx.fillStyle="#555";
+  const tStep = niceNum(tSpan/10, true);
+  const tStart = Math.ceil(tMin/tStep)*tStep;
+  for(let tv=tStart; tv<=tMaxV+1e-9; tv+=tStep){
+    const x = xToPx(tv);
+    ctx.beginPath(); ctx.moveTo(x,padT); ctx.lineTo(x,H-padB); ctx.stroke();
+    ctx.fillText(tv.toFixed(tStep<0.0001?6:(tStep<0.01?4:(tStep<0.1?3:2))), x-10, H-padB+14);
+  }
+  const yStep = niceNum(yMax/6, true);
+  for(let yv=-Math.ceil(yMax/yStep)*yStep; yv<=yMax; yv+=yStep){
+    const y = yToPx(yv);
+    if (y<padT-2 || y>H-padB+2) continue;
+    ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(W-padR,y); ctx.stroke();
+    ctx.fillText(yv.toFixed(Math.abs(yv)<10?1:0), 4, y+3);
+  }
+  // zero line
+  ctx.strokeStyle="#333"; ctx.lineWidth=1.2;
+  const y0 = yToPx(0);
+  ctx.beginPath(); ctx.moveTo(padL,y0); ctx.lineTo(W-padR,y0); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(padL,padT); ctx.lineTo(padL,H-padB); ctx.stroke();
+
+  // curve (лише видимий діапазон)
+  ctx.strokeStyle = opts.color; ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  for(let i=lo;i<=hi;i++){
+    const x = xToPx(tArr[i]), y = yToPx(yArr[i]);
+    if (i===lo) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+
+  // pinned points (лише ті, що видимі в поточному діапазоні)
+  ctx.fillStyle = "#00000090";
+  pinned.forEach(p=>{
+    if (p.idx<lo || p.idx>hi) return;
+    const x = xToPx(p.t), y = yToPx(opts.isVoltage? p.V : p.I*1000);
+    ctx.beginPath(); ctx.arc(x,y,3.2,0,7); ctx.fill();
+  });
+
+  // crosshair
+  if (cursorIdx!=null && cursorIdx>=lo && cursorIdx<=hi){
+    const x = xToPx(tArr[cursorIdx]), y = yToPx(yArr[cursorIdx]);
+    ctx.strokeStyle = "#4466cc88"; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(x,padT); ctx.lineTo(x,H-padB); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(W-padR,y); ctx.stroke();
+    ctx.fillStyle = opts.color;
+    ctx.beginPath(); ctx.arc(x,y,3.5,0,7); ctx.fill();
+  }
+
+  // рамка активного виділення (під час перетягування)
+  if (opts.dragSel){
+    const t1v = tArr[opts.dragSel.a], t2v = tArr[opts.dragSel.b];
+    const x1 = xToPx(Math.min(t1v,t2v)), x2 = xToPx(Math.max(t1v,t2v));
+    ctx.fillStyle = "rgba(50,110,220,0.15)";
+    ctx.fillRect(x1, padT, x2-x1, plotH);
+    ctx.strokeStyle = "rgba(50,110,220,0.6)"; ctx.lineWidth=1;
+    ctx.strokeRect(x1, padT, x2-x1, plotH);
+  }
+
+  return {padL,padR,padT,padB,plotW,plotH,tMin,tMaxV,yMax,xToPx,yToPx};
+}
+
+// ---------- app state / render ----------
+let els = {};
+
+function render(){
+  root.innerHTML = `
+    <div class="toprow">
+      <input type="text" id="studentId" placeholder="Ідентифікатор студента (ПІБ або код)" maxlength="20" value="${studentId.replace(/"/g,'')}"/>
+      <input type="text" id="groupId" placeholder="Група" maxlength="5" value="${studentGroup.replace(/"/g,'')}"/>
+      <button class="btn" id="startBtn">Почати вимірювання</button>
+      <span class="small" id="zoomTag" style="display:none;cursor:pointer;color:#2255aa;text-decoration:underline;">🔍 Скинути масштаб</span>
+      ${teacherMode ? `<button class="btn" id="peekBtn">👁 Параметри поточного досліду</button>` : ``}
+      <div class="gear" id="gearBtn" title="Налаштування викладача">⚙</div>
+    </div>
+    ${teacherMode && peekOpen && sim ? `
+    <div class="win" style="padding:8px 12px;font-size:12.5px;background:#fff8dc;">
+      <b>Параметри поточного досліду (${studentGroup? studentGroup+' / ':''}${studentId||'—'}):</b><br/>
+      Uₘ = ${params.V0.toFixed(2)} В,&nbsp; Iₘ = ${(params.I0*1000).toFixed(2)} мА,&nbsp; f = ${params.f.toFixed(2)} Гц,&nbsp; T = ${(sim.T*1000).toFixed(2)} мс<br/>
+      φ<sub>0U</sub> = ${sim.phiV.toFixed(1)}°,&nbsp; φ<sub>0I</sub> = ${sim.phiI.toFixed(1)}°,&nbsp; N періодів у кадрі = ${sim.periods.toFixed(2)}<br/>
+      R = ${sim.R.toFixed(2)} Ом,&nbsp; Pₘ = ${sim.P0.toFixed(3)} Вт,&nbsp; P<sub>T</sub> = ${sim.PT.toFixed(3)} Вт
+    </div>` : ``}
+
+    <div class="win">
+      <div class="titlebar"><span class="ico" style="background:#1a56db"></span><span class="name">[Вхід 1] Вольтметр</span>
+        <div class="win-btn">—</div><div class="win-btn">▢</div><div class="win-btn">✕</div>
+      </div>
+      <div class="plotwrap">
+        <canvas id="cV" width="1600" height="380"></canvas>
+        <div class="readout v" id="roV">Напруга: — В;&nbsp;&nbsp;&nbsp;&nbsp;Час: — с</div>
+      </div>
+    </div>
+
+    <div class="win">
+      <div class="titlebar"><span class="ico" style="background:#d81c1c"></span><span class="name">[Вхід 2] Амперметр</span>
+        <div class="win-btn">—</div><div class="win-btn">▢</div><div class="win-btn">✕</div>
+      </div>
+      <div class="plotwrap">
+        <canvas id="cI" width="1600" height="380"></canvas>
+        <div class="readout i" id="roI">Сила струму: — мА;&nbsp;&nbsp;&nbsp;&nbsp;Час: — с</div>
+      </div>
+    </div>
+
+    <div class="points-panel">
+      <div class="ptools">
+        <b style="font-size:13px;">Зняті точки</b>
+        <button class="btn" id="clearPts">Очистити</button>
+        <button class="btn" id="copyPts">Скопіювати таблицю</button>
+      </div>
+      <table>
+        <thead><tr><th>#</th><th>t, с</th><th>V, В</th><th>I, мА</th></tr></thead>
+        <tbody id="ptsBody"></tbody>
+      </table>
+    </div>
+
+    <div class="points-panel" id="answerPanel"></div>
+  `;
+
+  els.studentId = document.getElementById('studentId');
+  els.groupId = document.getElementById('groupId');
+  els.startBtn = document.getElementById('startBtn');
+  els.gearBtn = document.getElementById('gearBtn');
+  els.zoomTag = document.getElementById('zoomTag');
+  els.zoomTag.onclick = resetZoom;
+  els.cV = document.getElementById('cV');
+  els.cI = document.getElementById('cI');
+  els.roV = document.getElementById('roV');
+  els.roI = document.getElementById('roI');
+  els.ptsBody = document.getElementById('ptsBody');
+
+  els.startBtn.onclick = onStart;
+  els.gearBtn.onclick = ()=> teacherMode ? openConfigModal() : openTeacherModal();
+  document.getElementById('clearPts').onclick = ()=>{ pinned=[]; redraw(); };
+  document.getElementById('copyPts').onclick = copyPointsTable;
+  const peekBtn = document.getElementById('peekBtn');
+  if (peekBtn) peekBtn.onclick = ()=>{ peekOpen = !peekOpen; render(); };
+
+  attachCanvasEvents(els.cV, true);
+  attachCanvasEvents(els.cI, false);
+  attachGlobalMouseUp();
+
+  redraw();
+}
+
+function attachCanvasEvents(canvas, isVoltage){
+  function handlePos(clientX){
+    if (!sim) return;
+    cursorIdx = pixelToIdx(canvas, clientX);
+    redraw();
+  }
+  canvas.addEventListener('mousemove', e=>{
+    if (dragging){ dragCurIdx = pixelToIdx(canvas, e.clientX); redraw(); }
+    else handlePos(e.clientX);
+  });
+  canvas.addEventListener('mouseleave', ()=>{ if (!dragging){ cursorIdx=null; redraw(); } });
+  canvas.addEventListener('mousedown', e=>{
+    if (!sim) return;
+    e.preventDefault();
+    dragging = true;
+    dragStartIdx = pixelToIdx(canvas, e.clientX);
+    dragCurIdx = dragStartIdx;
+    dragStartClientX = e.clientX;
+  });
+  canvas.addEventListener('dblclick', ()=>{ if (sim) resetZoom(); });
+
+  // дотик: перетягування одним пальцем = виділення/зум (як миша), тап = точка,
+  // подвійний тап = скидання зуму. touch-action:none на канвасі (див. CSS) вже
+  // блокує скрол сторінки під час дотику до графіка.
+  let lastTapTime = 0;
+  canvas.addEventListener('touchstart', e=>{
+    if (!sim) return;
+    e.preventDefault();
+    const touch = e.touches[0];
+    if (!touch) return;
+    const now = Date.now();
+    if (now - lastTapTime < 350){
+      dragging = false; dragStartIdx=null; dragCurIdx=null;
+      resetZoom();
+      lastTapTime = 0;
+      return;
+    }
+    lastTapTime = now;
+    dragging = true;
+    dragStartIdx = pixelToIdx(canvas, touch.clientX);
+    dragCurIdx = dragStartIdx;
+    dragStartClientX = touch.clientX;
+  }, {passive:false});
+  canvas.addEventListener('touchmove', e=>{
+    e.preventDefault();
+    if (!sim || !e.touches[0]) return;
+    if (dragging){ dragCurIdx = pixelToIdx(canvas, e.touches[0].clientX); redraw(); }
+    else handlePos(e.touches[0].clientX);
+  }, {passive:false});
+}
+
+function finishDrag(clientX){
+  if (!dragging) return;
+  dragging = false;
+  if (!sim){ dragStartIdx=null; dragCurIdx=null; return; }
+  const pixelDist = Math.abs(clientX - dragStartClientX);
+  if (pixelDist < 5){
+    cursorIdx = dragStartIdx;
+    pinned.push({idx:cursorIdx, t:sim.t[cursorIdx], V:sim.V[cursorIdx], I:sim.I[cursorIdx]});
+    renderPointsTable();
+  } else if (dragStartIdx!=null && dragCurIdx!=null && dragStartIdx!==dragCurIdx){
+    let lo = Math.min(dragStartIdx, dragCurIdx), hi = Math.max(dragStartIdx, dragCurIdx);
+    if (hi-lo < 4) hi = Math.min(sim.t.length-1, lo+4);
+    zoomLo = lo; zoomHi = hi;
+  }
+  dragStartIdx = null; dragCurIdx = null;
+  redraw();
+}
+
+let globalMouseUpAttached = false;
+function attachGlobalMouseUp(){
+  if (globalMouseUpAttached) return;
+  globalMouseUpAttached = true;
+  window.addEventListener('mouseup', e=> finishDrag(e.clientX));
+  window.addEventListener('touchend', e=>{
+    const t = e.changedTouches && e.changedTouches[0];
+    finishDrag(t ? t.clientX : dragStartClientX);
+  });
+  window.addEventListener('touchcancel', ()=>{ dragging=false; dragStartIdx=null; dragCurIdx=null; });
+}
+
+function redraw(){
+  if (!sim){
+    ['cV','cI'].forEach(id=>{
+      const c = document.getElementById(id);
+      const ctx = c.getContext('2d');
+      ctx.fillStyle="#f0f0f0"; ctx.fillRect(0,0,c.width,c.height);
+      ctx.fillStyle="#888"; ctx.font="16px Tahoma";
+      ctx.fillText("Введіть ідентифікатор і натисніть «Почати вимірювання»", 30, c.height/2);
+    });
+    return;
+  }
+  const [lo,hi] = zoomRange();
+  const dragSel = (dragging && dragStartIdx!=null && dragCurIdx!=null && dragStartIdx!==dragCurIdx)
+    ? {a:dragStartIdx, b:dragCurIdx} : null;
+
+  drawPanel(els.cV, sim.t, sim.V, {color:"#1a56db", isVoltage:true, lo, hi, dragSel});
+  drawPanel(els.cI, sim.t, sim.I.map(x=>x*1000), {color:"#d81c1c", isVoltage:false, lo, hi, dragSel});
+
+  if (els.zoomTag) els.zoomTag.style.display = (zoomHi!=null) ? 'inline' : 'none';
+
+  if (cursorIdx!=null){
+    els.roV.innerHTML = `Напруга: ${sim.V[cursorIdx].toFixed(3)} В;&nbsp;&nbsp;&nbsp;&nbsp;Час: ${sim.t[cursorIdx].toFixed(5)} с`;
+    els.roI.innerHTML = `Сила струму: ${(sim.I[cursorIdx]*1000).toFixed(3)} мА;&nbsp;&nbsp;&nbsp;&nbsp;Час: ${sim.t[cursorIdx].toFixed(5)} с`;
+  } else {
+    els.roV.innerHTML = `Напруга: — В;&nbsp;&nbsp;&nbsp;&nbsp;Час: — с`;
+    els.roI.innerHTML = `Сила струму: — мА;&nbsp;&nbsp;&nbsp;&nbsp;Час: — с`;
+  }
+  renderPointsTable();
+}
+
+function renderAnswerPanel(){
+  const box = document.getElementById('answerPanel');
+  if (!box) return;
+  if (!sim){ box.innerHTML = ""; return; }
+  box.innerHTML = `
+    <b style="font-size:13px;">Ваша відповідь</b>
+    <div class="row2">
+      <div><label>Частота f, Гц</label><input id="ansF" type="text" placeholder="напр. 42.5"></div>
+      <div><label>Період T, с</label><input id="ansT" type="text" placeholder="напр. 0.0235"></div>
+      <div><label>Амплітудне значення напруги Uₘ, В</label><input id="ansU0" type="text" placeholder="напр. 8.5"></div>
+      <div><label>Амплітудне значення струму Iₘ, мА</label><input id="ansI0" type="text" placeholder="напр. 120"></div>
+      <div><label>Амплітудне значення потужності Pₘ, Вт</label><input id="ansP0" type="text" placeholder="напр. 1.02"></div>
+      <div><label>Середнє значення потужності P<sub>T</sub>, Вт</label><input id="ansPT" type="text" placeholder="напр. 0.51"></div>
+      <div><label>Опір навантаження R, Ом</label><input id="ansR" type="text" placeholder="напр. 45"></div>
+      <div><label>Початкова фаза напруги φ<sub>0U</sub>, °</label><input id="ansPhiV" type="text" placeholder="напр. 120"></div>
+      <div><label>Початкова фаза струму φ<sub>0I</sub>, °</label><input id="ansPhiI" type="text" placeholder="напр. 120"></div>
+    </div>
+    <button class="btn" id="submitAns">Надіслати відповідь</button>
+    <div id="ansFeedback" style="margin-top:8px;font-size:13px;"></div>
+  `;
+  document.getElementById('submitAns').onclick = async ()=>{
+    const f    = parseNum(document.getElementById('ansF').value);
+    const T    = parseNum(document.getElementById('ansT').value);
+    const U0   = parseNum(document.getElementById('ansU0').value);
+    const I0   = parseNum(document.getElementById('ansI0').value);
+    const P0   = parseNum(document.getElementById('ansP0').value);
+    const PT   = parseNum(document.getElementById('ansPT').value);
+    const R    = parseNum(document.getElementById('ansR').value);
+    const phiV = parseNum(document.getElementById('ansPhiV').value);
+    const phiI = parseNum(document.getElementById('ansPhiI').value);
+    if (!studentId){ alert("Спершу почніть вимірювання."); return; }
+    const ok = await saveAnswer(studentId, {f, T, U0, I0, P0, PT, R, phiV, phiI});
+    await sendToSheet({f, T, U0, I0, P0, PT, R, phiV, phiI});
+    const fb = document.getElementById('ansFeedback');
+    const rows = [];
+    function checkPct(label, val, ref, unit){
+      if (isNaN(val)){ rows.push(`<div>${label}: не вказано</div>`); return; }
+      const err = Math.abs(val-ref)/Math.abs(ref)*100;
+      const good = err<=15;
+      rows.push(`<div style="color:${good?'#0a7a1f':'#b30000'};">${label}: ${val} ${unit||''} ${good?'✅':'❌'} (розбіжність ~${err.toFixed(0)}%)</div>`);
+    }
+    function checkAng(label, val, ref){
+      if (isNaN(val)){ rows.push(`<div>${label}: не вказано</div>`); return; }
+      const d = angDiff(val, ref);
+      const tol = cfg.phaseTol ?? 10;
+      const good = d<=tol;
+      rows.push(`<div style="color:${good?'#0a7a1f':'#b30000'};">${label}: ${val}° ${good?'✅':'❌'} (розбіжність ${d.toFixed(0)}°, допуск ±${tol}°)</div>`);
+    }
+    checkPct('f', f, sim.f, 'Гц');
+    checkPct('T', T, sim.T, 'с');
+    checkPct('Uₘ', U0, params.V0, 'В');
+    checkPct('Iₘ', I0, params.I0*1000, 'мА');
+    checkPct('Pₘ', P0, sim.P0, 'Вт');
+    checkPct('P<sub>T</sub>', PT, sim.PT, 'Вт');
+    checkPct('R', R, sim.R, 'Ом');
+    checkAng('φ<sub>0U</sub>', phiV, sim.phiV);
+    checkAng('φ<sub>0I</sub>', phiI, sim.phiI);
+    fb.innerHTML = rows.join('') + (ok
+      ? `<div class="small" style="margin-top:4px;">Відповідь надіслано і збережено для викладача.</div>`
+      : `<div class="small" style="margin-top:4px;color:#b30000;">Увага: відповідь НЕ збережено через помилку зʼєднання. Натисніть «Надіслати відповідь» ще раз.</div>`);
+  };
+}
+
+function renderPointsTable(){
+  els.ptsBody.innerHTML = pinned.map((p,i)=>`
+    <tr><td>${i+1}</td><td>${p.t.toFixed(5)}</td><td>${p.V.toFixed(3)}</td><td>${(p.I*1000).toFixed(3)}</td></tr>
+  `).join('');
+}
+
+function copyPointsTable(){
+  const header = "t, с\tV, В\tI, мА\n";
+  const body = pinned.map(p=>`${p.t.toFixed(5)}\t${p.V.toFixed(3)}\t${(p.I*1000).toFixed(3)}`).join('\n');
+  const text = header+body;
+  navigator.clipboard?.writeText(text).catch(()=>{
+    const ta = document.createElement('textarea');
+    ta.value=text; document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); document.body.removeChild(ta);
+  });
+}
+
+async function onStart(){
+  const id = els.studentId.value.trim();
+  if (!id){ alert("Введіть ідентифікатор (ПІБ або код студента)."); return; }
+  studentId = id;
+  studentGroup = els.groupId.value.trim();
+  params = generateParams(id, cfg);
+  sim = simulate(params);
+  pinned = [];
+  cursorIdx = null;
+  zoomLo = 0; zoomHi = null;
+  redraw();
+  renderAnswerPanel();
+  const ok = await saveResult(id, params, sim);
+  if (ok) showToast('Вимірювання розпочато.', false);
+}
+
+// ---------- ключ доступу викладача ----------
+function openTeacherModal(){
+  const bg = document.createElement('div');
+  bg.className='modal-bg';
+  bg.innerHTML = `
+    <div class="modal">
+      <h3>Панель викладача</h3>
+      <input type="text" id="keyInput" placeholder="Ключ доступу" style="width:100%;padding:6px;border:1px solid #999;border-radius:3px;"/>
+      <div class="actions">
+        <button class="btn" id="keyCancel">Скасувати</button>
+        <button class="btn" id="keyOk">Увійти</button>
+      </div>
+    </div>`;
+  document.body.appendChild(bg);
+  document.getElementById('keyCancel').onclick=()=>bg.remove();
+  document.getElementById('keyOk').onclick=()=>{
+    const v = document.getElementById('keyInput').value;
+    if (v === cfg.key){ teacherMode = true; bg.remove(); render(); openConfigModal(); }
+    else alert("Невірний ключ.");
+  };
+}
+
+// ---------- налаштування діапазонів ----------
+function openConfigModal(){
+  const bg = document.createElement('div');
+  bg.className='modal-bg';
+  bg.innerHTML = `
+    <div class="modal">
+      <h3>Налаштування діапазонів</h3>
+      <div class="row2">
+        <div><label>Uₘ мін, В</label><input id="Vmin" value="${cfg.Vmin}"></div>
+        <div><label>Uₘ макс, В</label><input id="Vmax" value="${cfg.Vmax}"></div>
+        <div><label>Iₘ мін, мА</label><input id="Imin" value="${cfg.Imin}"></div>
+        <div><label>Iₘ макс, мА</label><input id="Imax" value="${cfg.Imax}"></div>
+        <div><label>f мін, Гц</label><input id="fmin" value="${cfg.fmin}"></div>
+        <div><label>f макс, Гц</label><input id="fmax" value="${cfg.fmax}"></div>
+        <div><label>Допуск по фазі, °</label><input id="phaseTol" value="${cfg.phaseTol}"></div>
+        <div><label>Новий ключ доступу</label><input id="key" value="${cfg.key}"></div>
+        <div style="grid-column:1/-1;"><label>URL збору результатів (Google Apps Script Web App, …/exec)</label><input id="endpoint" value="${cfg.endpoint||''}" placeholder="https://script.google.com/macros/s/.../exec"></div>
+      </div>
+      <div class="actions">
+        <button class="btn" id="showResults">Результати студентів</button>
+        <button class="btn" id="cfgCancel">Закрити</button>
+        <button class="btn" id="cfgSave">Зберегти</button>
+      </div>
+      <div id="resultsArea"></div>
+    </div>`;
+  document.body.appendChild(bg);
+  document.getElementById('cfgCancel').onclick=()=>{ bg.remove(); render(); };
+  document.getElementById('cfgSave').onclick=async ()=>{
+    const g = id=>parseNum(document.getElementById(id).value);
+    const newCfg = {
+      Vmin:g('Vmin'), Vmax:g('Vmax'),
+      Imin:g('Imin'), Imax:g('Imax'),
+      fmin:g('fmin'), fmax:g('fmax'),
+      phaseTol:g('phaseTol'),
+      endpoint: document.getElementById('endpoint').value.trim(),
+      key: document.getElementById('key').value || cfg.key
+    };
+    const ok = await saveConfig(newCfg);
+    if (ok) alert("Збережено.");
+    bg.remove();
+    render();
+  };
+  document.getElementById('showResults').onclick= async ()=>{
+    const area = document.getElementById('resultsArea');
+    area.innerHTML = "Завантаження…";
+    const results = await loadAllResults();
+    if (!results.length){ area.innerHTML = "<p class='small'>Поки немає жодного результату.</p>"; return; }
+    function fmtPct(val, ref){
+      if (val==null || isNaN(val)) return '<span class="small">не надіслано</span>';
+      const err = Math.abs(val-ref)/Math.abs(ref)*100;
+      const ok = err<=15;
+      return `<span style="color:${ok?'#0a7a1f':'#b30000'};">${val} (${ok?'✅':'❌'} ${err.toFixed(0)}%)</span>`;
+    }
+    function fmtAng(val, ref){
+      if (val==null || isNaN(val)) return '<span class="small">не надіслано</span>';
+      const d = angDiff(val, ref);
+      const tol = cfg.phaseTol ?? 10;
+      const ok = d<=tol;
+      return `<span style="color:${ok?'#0a7a1f':'#b30000'};">${val} (${ok?'✅':'❌'} ${d.toFixed(0)}°)</span>`;
+    }
+    area.innerHTML = `
+      <table class="resulttable">
+        <thead><tr><th>Група</th><th>Студент</th>
+        <th>f задане</th><th>f відповідь</th>
+        <th>T задане</th><th>T відповідь</th>
+        <th>Uₘ задане</th><th>Uₘ відповідь</th>
+        <th>Iₘ задане</th><th>Iₘ відповідь</th>
+        <th>Pₘ задане</th><th>Pₘ відповідь</th>
+        <th>P<sub>T</sub> задане</th><th>P<sub>T</sub> відповідь</th>
+        <th>R задане</th><th>R відповідь</th>
+        <th>φ<sub>0U</sub> задане</th><th>φ<sub>0U</sub> відповідь</th>
+        <th>φ<sub>0I</sub> задане</th><th>φ<sub>0I</sub> відповідь</th>
+        </tr></thead>
+        <tbody>
+          ${results.map(r=>`<tr>
+            <td>${r.group||''}</td>
+            <td>${r.id}</td>
+            <td>${r.f.toFixed(2)}</td>
+            <td>${fmtPct(r.answer?.f, r.f)}</td>
+            <td>${r.T.toFixed(5)}</td>
+            <td>${fmtPct(r.answer?.T, r.T)}</td>
+            <td>${r.V0.toFixed(2)}</td>
+            <td>${fmtPct(r.answer?.U0, r.V0)}</td>
+            <td>${(r.I0*1000).toFixed(2)}</td>
+            <td>${fmtPct(r.answer?.I0, r.I0*1000)}</td>
+            <td>${r.P0.toFixed(3)}</td>
+            <td>${fmtPct(r.answer?.P0, r.P0)}</td>
+            <td>${r.PT.toFixed(3)}</td>
+            <td>${fmtPct(r.answer?.PT, r.PT)}</td>
+            <td>${r.R.toFixed(2)}</td>
+            <td>${fmtPct(r.answer?.R, r.R)}</td>
+            <td>${r.phiV.toFixed(1)}</td>
+            <td>${fmtAng(r.answer?.phiV, r.phiV)}</td>
+            <td>${r.phiI.toFixed(1)}</td>
+            <td>${fmtAng(r.answer?.phiI, r.phiI)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>`;
+  };
+}
+
+// ---------- init ----------
+(async function init(){
+  await loadConfig();
+  render();
+})();
+
+})();
+</script>
+</body>
+</html>
