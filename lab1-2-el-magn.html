@@ -308,7 +308,7 @@ async function sendToSheet(ans){
     // Apps Script Web App не повертає CORS-заголовків, тому відповідь непрозора
     // (mode:'no-cors') — можна підтвердити лише факт відправки, не успіх на сервері.
     await fetch(cfg.endpoint, {
-      method:'POST', mode:'no-cors',
+      method:'POST', mode:'no-cors', keepalive:true,
       headers:{'Content-Type':'text/plain;charset=utf-8'},
       body: JSON.stringify(payload)
     });
