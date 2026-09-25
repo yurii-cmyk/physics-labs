@@ -1,0 +1,1149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Конденсатор у колі змінного струму</title>
+</head>
+<body>
+<div id="app"></div>
+<style>
+#app, #app * { box-sizing: border-box; font-family: "Segoe UI", Tahoma, Arial, sans-serif; }
+#app {
+  background:#d9d9d9;
+  padding:14px;
+  border-radius:6px;
+  color:#111;
+  max-width:100%;
+}
+.toprow{
+  display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+  margin-bottom:10px; font-size:13px;
+}
+.toprow input[type=text]{
+  padding:5px 8px; border:1px solid #999; border-radius:3px; font-size:13px; width:220px;
+}
+#studentId{ width:170px; }
+#groupId{ width:64px; }
+.btn{
+  padding:6px 12px; border:1px solid #6b6b6b; border-radius:3px; background:linear-gradient(#fdfdfd,#e2e2e2);
+  cursor:pointer; font-size:13px;
+}
+.btn:hover{ background:linear-gradient(#f5f5f5,#d5d5d5); }
+.btn:active{ background:#cfcfcf; }
+.rightGroup{ margin-left:auto; display:flex; align-items:center; gap:8px; }
+.gear{
+  width:30px;height:30px;border-radius:50%;border:1px solid #999;
+  background:#efefef;cursor:pointer;font-size:15px;display:flex;align-items:center;justify-content:center;
+}
+.win{
+  background:#efefef; border:1px solid #8a8a8a; border-radius:2px; margin-bottom:10px;
+  box-shadow:1px 1px 4px rgba(0,0,0,.25);
+}
+.titlebar{
+  background:linear-gradient(#f7f7f7,#dcdcdc); border-bottom:1px solid #b9b9b9;
+  padding:4px 8px; font-size:12px; display:flex; align-items:center; gap:6px;
+}
+.titlebar .ico{width:12px;height:12px;display:inline-block;border-radius:2px;}
+.titlebar .name{flex:1;}
+.titlebar .win-btn{width:16px;height:14px;border:1px solid #aaa;background:#f2f2f2;text-align:center;font-size:9px;line-height:13px;margin-left:2px;}
+.plotwrap{ position:relative; background:#f0f0f0; user-select:none; }
+canvas{ display:block; width:100%; height:auto; cursor:crosshair; touch-action:none; }
+.titlebar .readout-inline{ font-weight:600; font-size:11.5px; margin-left:2px; }
+.points-panel{
+  background:#efefef;border:1px solid #8a8a8a;border-radius:2px;padding:10px;margin-top:4px;
+}
+.points-panel table{ border-collapse:collapse; width:100%; font-size:12.5px; margin-top:6px;}
+.points-panel th,.points-panel td{ border:1px solid #bbb; padding:3px 8px; text-align:right; }
+.points-panel th{ background:#dcdcdc; }
+.ptools{ display:flex; gap:8px; align-items:center; }
+.modal-bg{
+  position:fixed; inset:0; background:rgba(0,0,0,.4); display:flex; align-items:center; justify-content:center; z-index:50;
+}
+.modal{
+  background:#f4f4f4; border:1px solid #888; border-radius:6px; padding:18px 20px; width:min(92vw,480px);
+  max-height:85vh; overflow:auto;
+}
+.modal h3{ margin:0 0 10px 0; font-size:15px; }
+.row2{ display:grid; grid-template-columns:1fr 1fr; gap:8px 10px; margin-bottom:8px; }
+.row2 label{ font-size:12px; color:#333; display:block; margin-bottom:2px; }
+.row2 input{ width:100%; padding:4px 6px; border:1px solid #999; border-radius:3px; font-size:13px; }
+.modal .actions{ display:flex; gap:8px; justify-content:flex-end; margin-top:12px; }
+.small{ font-size:11.5px; color:#666; }
+.resulttable{ width:100%; border-collapse:collapse; font-size:11.5px; margin-top:8px; }
+.resulttable th, .resulttable td{ border:1px solid #ccc; padding:3px 6px; }
+.resulttable th{ background:#e2e2e2; }
+.hint{ font-size:12px; color:#555; margin-bottom:8px; }
+.langsw{ position:relative; font-size:12.5px; }
+.langsw .langbtn{
+  padding:6px 10px; border:1px solid #999; border-radius:3px; background:linear-gradient(#fdfdfd,#e2e2e2);
+  cursor:pointer; white-space:nowrap; font-size:12.5px;
+}
+.langsw .langbtn:hover{ background:linear-gradient(#f5f5f5,#d5d5d5); }
+.langsw .langmenu{
+  position:absolute; right:0; top:calc(100% + 3px); background:#fff; border:1px solid #999; border-radius:3px;
+  box-shadow:1px 2px 6px rgba(0,0,0,.25); z-index:30; display:none; min-width:130px; overflow:hidden;
+}
+.langsw.open .langmenu{ display:block; }
+.langsw .langmenu a{ display:block; padding:7px 12px; color:#222; text-decoration:none; cursor:pointer; white-space:nowrap; }
+.langsw .langmenu a:hover{ background:#eef2fa; }
+.langsw .langmenu a.active{ background:#2255aa; color:#fff; }
+</style>
+
+<script>
+(function(){
+
+/* ==========================================================================
+   TASK DEFINITION — конденсатор у колі змінного струму.
+   Ідеальний конденсатор: струм випереджає напругу на 90° (i = C·dv/dt).
+   ENGINE (нижче) не змінюється — скопійовано буквально з engine-template.html.
+   ========================================================================== */
+const TASK = {
+  id: 'capacitor-ac',
+
+  title: 'Конденсатор у колі змінного струму',
+
+  // Генеруються: амплітуда напруги, частота, початкова фаза напруги та
+  // ємність конденсатора. Амплітуда струму Iₘ — НЕ параметр, вона однозначно
+  // визначається цими чотирма величинами (Iₘ = Uₘ·ω·C), тож обчислюється
+  // в simulate() як похідна.
+  params: [
+    {id:'Um',     label:'Амплітуда напруги',        unit:'В',  min:2,   max:10},
+    {id:'f',      label:'Частота',                  unit:'Гц', min:200, max:800},
+    {id:'phi0U',  label:'Початкова фаза напруги',    unit:'°',  min:0,   max:360},
+    {id:'C',      label:'Ємність конденсатора',      unit:'мкФ',min:0.5, max:3}
+  ],
+
+  simulate(P, quantize){
+    const Um = P.Um, f = P.f, phi0U = P.phi0U*Math.PI/180, C = P.C*1e-6; // Фарад
+    const omega = 2*Math.PI*f;
+    const Im = Um*omega*C; // амплітуда струму (реактивний струм, А)
+    const T = 1/f;
+    const tMax = 3*T;
+    const N = 1600;
+    const dt = tMax/N;
+    const t = new Array(N+1), Vraw = new Array(N+1), Iraw = new Array(N+1);
+    for(let i=0;i<=N;i++){
+      t[i] = i*dt;
+      Vraw[i] = Um*Math.sin(omega*t[i]+phi0U);
+      // струм випереджає напругу на 90° (π/2) для ідеального конденсатора
+      Iraw[i] = Im*Math.sin(omega*t[i]+phi0U+Math.PI/2);
+    }
+    const V = new Array(N+1), I = new Array(N+1);
+    for(let i=0;i<=N;i++){
+      V[i] = quantize(Vraw[i], Um*1.2);
+      I[i] = quantize(Iraw[i], Im*1.2);
+    }
+    const phi0I = (P.phi0U + 90) % 360;
+    const Pm = 0.5*Um*Im; // амплітуда коливань миттєвої потужності p(t)=u(t)i(t); середня потужність за період — нуль (реактивний елемент)
+    return {
+      t,
+      series: { V, I },
+      derived: { T, Im, phi0I, Pm }
+    };
+  },
+
+  panels: [
+    {title:'[Вхід 1] Вольтметр', color:'#1a56db',
+     x:'t', xLabel:'Час', xUnit:'с', xDecimals:4,
+     y:'V', yLabel:'Напруга', yUnit:'В', yDecimals:2},
+    {title:'[Вхід 2] Амперметр', color:'#d81c1c',
+     x:'t', xLabel:'Час', xUnit:'с', xDecimals:4,
+     y:'I', yLabel:'Сила струму', yUnit:'мА', yScale:1000, yDecimals:2}
+  ],
+
+  answerFields: [
+    {id:'f',     shortLabel:'f',    label:'Частота f, Гц',                              unit:'Гц', placeholder:'напр. 425',   ref:ctx=>ctx.params.f},
+    {id:'T',     shortLabel:'T',    label:'Період T, с',                                unit:'с',  placeholder:'напр. 0.00235',ref:ctx=>ctx.derived.T},
+    {id:'Um',    shortLabel:'Um',   label:'Амплітудне значення напруги U<sub>m</sub>, В', unit:'В',  placeholder:'напр. 8.5',   ref:ctx=>ctx.params.Um},
+    {id:'Im',    shortLabel:'Im',   label:'Амплітудне значення струму I<sub>m</sub>, мА', unit:'мА', placeholder:'напр. 15.7',  ref:ctx=>ctx.derived.Im*1000},
+    {id:'C',     shortLabel:'C',    label:'Ємність конденсатора C, мкФ',                unit:'мкФ',placeholder:'напр. 1.2',   ref:ctx=>ctx.params.C},
+    {id:'Pm',    shortLabel:'Pm',   label:'Амплітуда коливань потужності P<sub>m</sub>, Вт', unit:'Вт', placeholder:'напр. 0.039', ref:ctx=>ctx.derived.Pm},
+    {id:'phi0U', shortLabel:'φ0U',  label:'Початкова фаза напруги φ<sub>0U</sub>, °',   unit:'°',  placeholder:'напр. 120',   ref:ctx=>ctx.params.phi0U, isAngle:true},
+    {id:'phi0I', shortLabel:'φ0I',  label:'Початкова фаза струму φ<sub>0I</sub>, °',    unit:'°',  placeholder:'напр. 210',   ref:ctx=>ctx.derived.phi0I, isAngle:true}
+  ]
+};
+
+/* ==========================================================================
+   DEPLOY CONFIG — edit this block directly (e.g. via GitHub's web editor)
+   when preparing a specific deployment: parameter ranges for a particular
+   demo, the teacher access key, and the results-collection URL.
+
+   This is what actually ships to students/viewers. The teacher settings
+   panel (⚙, password-gated) only lets you try out ranges LOCALLY in your
+   own browser — those changes land in your own localStorage and are never
+   seen by anyone else's browser (same reason the endpoint below can't be
+   left to the settings panel either — see the note on window.storage in
+   ENGINE below). Normal workflow: open the file, enter teacher mode, try
+   different ranges until the demo looks right (e.g. the aperiodic regime),
+   then copy the numbers you found into paramRanges below and save the file
+   under a name that describes this particular deployment
+   (e.g. rlc-aperiodic-demo.html).
+
+   endpoint — the Apps Script Web App URL (…/exec) that results get POSTed
+   to. THIS ONE FIELD decides which "version" the file is, no separate flag:
+     - endpoint filled in  → student version: answers are sent to that
+       Google Sheet.
+     - endpoint left ""    → public/self-check version (e.g. for a YouTube
+       description link): nothing is ever sent anywhere, only the on-screen
+       ✅/❌ check still works.
+   So a deployment doesn't have to be planned ahead — publish the file with
+   endpoint:"" first (safe default, self-check), and paste in the Sheet's
+   /exec URL later, directly here, whenever that particular Sheet is ready.
+   ========================================================================== */
+const DEFAULT_CFG = {
+  paramRanges: Object.fromEntries(TASK.params.map(p=>[p.id, {min:p.min, max:p.max}])),
+  phaseTol: 10,   // ° — global tolerance for isAngle fields (unless a field sets its own)
+  key: "teacher123",
+  endpoint: "" // "" = public self-check version; a Sheet /exec URL = student version (see comment above)
+};
+
+/* ==========================================================================
+   ENGINE — generic, does not depend on the specific task. Should not need
+   changes for a new lab.
+   ========================================================================== */
+
+const ADC_BITS = 16; // instrument ADC resolution — engine constant, not a task parameter
+
+// All storage and the Apps Script filter key are auto-namespaced by TASK.id —
+// no need to manually sync names between several deployed trainers.
+const CFG_KEY = TASK.id + ":config";
+const RESULTS_PREFIX = TASK.id + ":result:";
+const ANSWERS_PREFIX = TASK.id + ":answer:";
+const LS_PREFIX = 'physlab-sim:' + TASK.id + ':';
+const SHEET_KEY = 'engine-' + TASK.id; // must match ACCESS_KEY in the Apps Script
+const LANG_KEY = TASK.id + ":lang";
+
+// ---------- UI language: engine chrome only, never TASK content ----------
+const LANGS = ['en','uk','es'];
+const LANG_LABELS = { en:'English', uk:'Українська', es:'Español' }; // shown in the picker regardless of current uiLang
+let uiLang = 'en';
+
+const STRINGS = {
+  en: {
+    idPlaceholder: 'Student ID',
+    groupPlaceholder: 'Group',
+    startBtn: 'Start measurement',
+    resetZoom: '🔍 Reset zoom',
+    peekBtn: '👁 Current experiment parameters',
+    gearTitle: 'Teacher settings',
+    teacherModeTitle: (g,id)=>`Teacher mode — current experiment parameters (${g}${id}):`,
+    pinnedPointsTitle: 'Pinned points',
+    clearBtn: 'Clear',
+    copyBtn: 'Copy table',
+    canvasHint: 'Enter an identifier and click "Start measurement"',
+    yourAnswerTitle: 'Your answer',
+    checkBtn: 'Check',
+    notSpecified: 'not specified',
+    deviationPct: (err)=>`(deviation ~${err}%)`,
+    deviationDeg: (d,tol)=>`(deviation ${d}°, tolerance ±${tol}°)`,
+    enterIdFirst: 'Please enter an identifier (name or student code).',
+    anonConfirm: 'Please enter a student identifier.\n\nContinue anonymously?',
+    startFirst: 'Please start a measurement first.',
+    measurementStarted: 'Measurement started.',
+    savingFailedConfig: 'Could not save settings. Check your connection and try again.',
+    savingFailedResult: 'Could not save the measurement result. Try "Start measurement" again.',
+    savingFailedAnswer: 'Could not save the answer. Try again.',
+    sentToSheet: "Result sent to the teacher's spreadsheet.",
+    sentToSheetFail: "Could not reach the teacher's spreadsheet. The answer was saved locally — let the teacher know.",
+    answerSentNote: 'Checked and sent to the teacher.',
+    answerSendFailedNote: 'Warning: the answer was NOT saved due to a connection error. Click "Check" again.',
+    selfCheckNote: 'Self-check only — nothing is sent anywhere.',
+    wrongKey: 'Incorrect key.',
+    teacherPanelTitle: 'Teacher panel',
+    keyPlaceholder: 'Access key',
+    cancelBtn: 'Cancel',
+    enterBtn: 'Enter',
+    settingsTitle: 'Parameter range settings',
+    phaseTolLabel: 'Phase tolerance, °',
+    newKeyLabel: 'New access key',
+    endpointLabel: 'Results collection URL (Google Apps Script Web App, …/exec)',
+    showResultsBtn: 'Student results',
+    closeBtn: 'Close',
+    saveBtn: 'Save',
+    savedAlert: 'Saved.',
+    loadingText: 'Loading…',
+    noResultsText: 'No results yet.',
+    notSubmitted: 'not submitted',
+    groupCol: 'Group',
+    studentCol: 'Student',
+    givenSuffix: 'given',
+    answerSuffix: 'answer'
+  },
+  uk: {
+    idPlaceholder: 'Ідентифікатор студента',
+    groupPlaceholder: 'Група',
+    startBtn: 'Почати вимірювання',
+    resetZoom: '🔍 Скинути масштаб',
+    peekBtn: '👁 Параметри поточного досліду',
+    gearTitle: 'Налаштування викладача',
+    teacherModeTitle: (g,id)=>`Режим викладача — параметри поточного досліду (${g}${id}):`,
+    pinnedPointsTitle: 'Зняті точки',
+    clearBtn: 'Очистити',
+    copyBtn: 'Скопіювати таблицю',
+    canvasHint: 'Введіть ідентифікатор і натисніть «Почати вимірювання»',
+    yourAnswerTitle: 'Ваша відповідь',
+    checkBtn: 'Перевірити',
+    notSpecified: 'не вказано',
+    deviationPct: (err)=>`(розбіжність ~${err}%)`,
+    deviationDeg: (d,tol)=>`(розбіжність ${d}°, допуск ±${tol}°)`,
+    enterIdFirst: 'Введіть ідентифікатор (ПІБ або код студента).',
+    anonConfirm: 'Введіть код ідентифікатора студента.\n\nПродовжити анонімно?',
+    startFirst: 'Спершу почніть вимірювання.',
+    measurementStarted: 'Вимірювання розпочато.',
+    savingFailedConfig: 'Не вдалося зберегти налаштування. Перевірте зʼєднання і спробуйте ще раз.',
+    savingFailedResult: 'Не вдалося зберегти результат вимірювання. Спробуйте «Почати вимірювання» ще раз.',
+    savingFailedAnswer: 'Не вдалося зберегти відповідь. Спробуйте ще раз.',
+    sentToSheet: 'Результат надіслано у таблицю викладача.',
+    sentToSheetFail: 'Не вдалося з’єднатися з таблицею викладача. Відповідь збережено локально — повідомте викладача.',
+    answerSentNote: 'Перевірено і надіслано викладачу.',
+    answerSendFailedNote: 'Увага: відповідь НЕ збережено через помилку зʼєднання. Натисніть «Перевірити» ще раз.',
+    selfCheckNote: 'Це самоперевірка — відповідь нікуди не передається.',
+    wrongKey: 'Невірний ключ.',
+    teacherPanelTitle: 'Панель викладача',
+    keyPlaceholder: 'Ключ доступу',
+    cancelBtn: 'Скасувати',
+    enterBtn: 'Увійти',
+    settingsTitle: 'Налаштування діапазонів параметрів',
+    phaseTolLabel: 'Допуск по фазі, °',
+    newKeyLabel: 'Новий ключ доступу',
+    endpointLabel: 'URL збору результатів (Google Apps Script Web App, …/exec)',
+    showResultsBtn: 'Результати студентів',
+    closeBtn: 'Закрити',
+    saveBtn: 'Зберегти',
+    savedAlert: 'Збережено.',
+    loadingText: 'Завантаження…',
+    noResultsText: 'Поки немає жодного результату.',
+    notSubmitted: 'не надіслано',
+    groupCol: 'Група',
+    studentCol: 'Студент',
+    givenSuffix: 'задане',
+    answerSuffix: 'відповідь'
+  },
+  es: {
+    idPlaceholder: 'Identificador del estudiante',
+    groupPlaceholder: 'Grupo',
+    startBtn: 'Iniciar medición',
+    resetZoom: '🔍 Restablecer zoom',
+    peekBtn: '👁 Parámetros del experimento actual',
+    gearTitle: 'Configuración del profesor',
+    teacherModeTitle: (g,id)=>`Modo profesor — parámetros del experimento actual (${g}${id}):`,
+    pinnedPointsTitle: 'Puntos fijados',
+    clearBtn: 'Borrar',
+    copyBtn: 'Copiar tabla',
+    canvasHint: 'Introduzca un identificador y pulse «Iniciar medición»',
+    yourAnswerTitle: 'Su respuesta',
+    checkBtn: 'Comprobar',
+    notSpecified: 'no indicado',
+    deviationPct: (err)=>`(desviación ~${err}%)`,
+    deviationDeg: (d,tol)=>`(desviación ${d}°, tolerancia ±${tol}°)`,
+    enterIdFirst: 'Introduzca un identificador (nombre o código del estudiante).',
+    anonConfirm: 'Introduzca un identificador de estudiante.\n\n¿Continuar de forma anónima?',
+    startFirst: 'Primero inicie una medición.',
+    measurementStarted: 'Medición iniciada.',
+    savingFailedConfig: 'No se pudo guardar la configuración. Compruebe la conexión e inténtelo de nuevo.',
+    savingFailedResult: 'No se pudo guardar el resultado de la medición. Pulse «Iniciar medición» de nuevo.',
+    savingFailedAnswer: 'No se pudo guardar la respuesta. Inténtelo de nuevo.',
+    sentToSheet: 'Resultado enviado a la hoja de cálculo del profesor.',
+    sentToSheetFail: 'No se pudo conectar con la hoja de cálculo del profesor. La respuesta se guardó localmente — avise al profesor.',
+    answerSentNote: 'Comprobado y enviado al profesor.',
+    answerSendFailedNote: 'Atención: la respuesta NO se guardó debido a un error de conexión. Pulse «Comprobar» de nuevo.',
+    selfCheckNote: 'Esto es solo autoevaluación — la respuesta no se envía a ningún sitio.',
+    wrongKey: 'Clave incorrecta.',
+    teacherPanelTitle: 'Panel del profesor',
+    keyPlaceholder: 'Clave de acceso',
+    cancelBtn: 'Cancelar',
+    enterBtn: 'Entrar',
+    settingsTitle: 'Configuración de los rangos de parámetros',
+    phaseTolLabel: 'Tolerancia de fase, °',
+    newKeyLabel: 'Nueva clave de acceso',
+    endpointLabel: 'URL de recogida de resultados (Google Apps Script Web App, …/exec)',
+    showResultsBtn: 'Resultados de los estudiantes',
+    closeBtn: 'Cerrar',
+    saveBtn: 'Guardar',
+    savedAlert: 'Guardado.',
+    loadingText: 'Cargando…',
+    noResultsText: 'Todavía no hay resultados.',
+    notSubmitted: 'no enviado',
+    groupCol: 'Grupo',
+    studentCol: 'Estudiante',
+    givenSuffix: 'dado',
+    answerSuffix: 'respuesta'
+  }
+};
+function t(key, ...args){
+  const dict = STRINGS[uiLang] || STRINGS.en;
+  const val = (key in dict) ? dict[key] : STRINGS.en[key];
+  return typeof val === 'function' ? val(...args) : val;
+}
+
+let cfg = null;
+let studentId = "";
+let studentGroup = "";
+let params = null;      // generated params, e.g. {Um,Im,f,phi}
+let sim = null;         // {t, series:{...}, derived:{...}}
+let pinned = [];         // pinned points {idx}
+let cursorIdx = null;
+let teacherMode = false; // true once the correct key has been entered this session
+let peekOpen = false;    // whether the current-experiment parameters box is expanded
+
+const root = document.getElementById('app');
+
+// ---------- deterministic RNG from a string ----------
+function hashStr(str){
+  let h = 2166136261;
+  for(let i=0;i<str.length;i++){
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+function mulberry32(seed){
+  return function(){
+    seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function rangeVal(rng, min, max){ return min + rng()*(max-min); }
+
+function generateParams(id, c){
+  const base = hashStr(id.trim().toLowerCase());
+  const P = {};
+  TASK.params.forEach((def, idx)=>{
+    const rng = mulberry32(base ^ (0x1111 * (idx+1))); // fixed scheme, do not change
+    const r = (c.paramRanges && c.paramRanges[def.id]) || {min:def.min, max:def.max};
+    P[def.id] = rangeVal(rng, r.min, r.max);
+  });
+  P.noiseRng = mulberry32(base ^ 0x5555);
+  return P;
+}
+
+// ---------- 16-bit ADC model: ±1–2 LSB dither, not an arbitrary "% amplitude" ----------
+function quantizeADC(value, fullScaleRange, rng){
+  const levels = Math.pow(2, ADC_BITS) - 1;
+  const lsb = (2*fullScaleRange) / levels;
+  const ditherLSB = rng ? (rng()*4 - 2) : 0;
+  let v = value + ditherLSB*lsb;
+  v = Math.max(-fullScaleRange, Math.min(fullScaleRange, v));
+  return Math.round(v/lsb)*lsb;
+}
+
+function runSimulation(id){
+  const P = generateParams(id, cfg);
+  const quantize = (value, range) => quantizeADC(value, range, P.noiseRng);
+  const result = TASK.simulate(P, quantize);
+  result.series = { t: result.t, ...result.series };
+  return { P, sim: result };
+}
+
+// ---------- series display metadata (taken from whichever panel references it) ----------
+function seriesMeta(id){
+  for(const p of TASK.panels){
+    if (p.x===id) return {label:p.xLabel||id, unit:p.xUnit||'', scale:p.xScale||1, decimals:p.xDecimals??3};
+    if (p.y===id) return {label:p.yLabel||id, unit:p.yUnit||'', scale:p.yScale||1, decimals:p.yDecimals??3};
+  }
+  return {label:id, unit:'', scale:1, decimals:3};
+}
+function answerCtx(){ return {params, derived: sim ? sim.derived : {}}; }
+
+// ---------- circular difference in degrees (for isAngle fields) ----------
+function angDiff(a,b){
+  let d = Math.abs(a-b) % 360;
+  if (d>180) d = 360-d;
+  return d;
+}
+
+// ---------- in-app toast (no console.error, so the platform console never pops up) ----------
+function showToast(msg, isError){
+  let box = document.getElementById('appToast');
+  if (!box){
+    box = document.createElement('div');
+    box.id = 'appToast';
+    box.style.cssText = 'position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:999;'+
+      'padding:8px 16px;border-radius:5px;font-size:13px;max-width:90vw;box-shadow:0 2px 8px rgba(0,0,0,.3);'+
+      'transition:opacity .3s;';
+    document.body.appendChild(box);
+  }
+  box.style.background = isError ? '#c0392b' : '#2d7a2d';
+  box.style.color = '#fff';
+  box.textContent = msg;
+  box.style.opacity = '1';
+  clearTimeout(box._hideTimer);
+  box._hideTimer = setTimeout(()=>{ box.style.opacity='0'; }, 4000);
+}
+
+// ---------- storage: window.storage (Claude artifact) with localStorage fallback
+// (for standalone .html files opened directly in a browser) ----------
+const hasArtifactStorage = (typeof window.storage !== 'undefined' && window.storage !== null);
+
+async function storageGet(key){
+  if (hasArtifactStorage) return await window.storage.get(key, true);
+  const raw = localStorage.getItem(LS_PREFIX+key);
+  return raw!=null ? {key, value:raw, shared:false} : null;
+}
+async function storageSet(key, value){
+  if (hasArtifactStorage) return await window.storage.set(key, value, true);
+  localStorage.setItem(LS_PREFIX+key, value);
+  return {key, value, shared:false};
+}
+async function storageList(prefix){
+  if (hasArtifactStorage) return await window.storage.list(prefix, true);
+  const keys = [];
+  for(let i=0;i<localStorage.length;i++){
+    const k = localStorage.key(i);
+    if (k && k.startsWith(LS_PREFIX+prefix)) keys.push(k.slice(LS_PREFIX.length));
+  }
+  return {keys};
+}
+
+// ---------- storage helpers ----------
+async function loadConfig(){
+  try{
+    const r = await storageGet(CFG_KEY);
+    cfg = r ? {...DEFAULT_CFG, ...JSON.parse(r.value)} : {...DEFAULT_CFG};
+  }catch(e){ cfg = {...DEFAULT_CFG}; }
+}
+async function saveConfig(newCfg){
+  cfg = newCfg;
+  try{ await storageSet(CFG_KEY, JSON.stringify(cfg)); return true; }
+  catch(e){ showToast(t('savingFailedConfig'), true); return false; }
+}
+async function saveResult(id, P, s){
+  try{
+    await storageSet(RESULTS_PREFIX+id, JSON.stringify({ id, group:studentGroup, params:P, derived:s.derived, ts: Date.now() }));
+    return true;
+  }catch(e){
+    showToast(t('savingFailedResult'), true);
+    return false;
+  }
+}
+async function saveAnswer(id, values){
+  try{
+    await storageSet(ANSWERS_PREFIX+id, JSON.stringify({ id, values, submittedAt: Date.now() }));
+    return true;
+  }catch(e){
+    showToast(t('savingFailedAnswer'), true);
+    return false;
+  }
+}
+// send the answer + reference values to the teacher's Google Sheet (Apps Script Web App)
+async function sendToSheet(ansValues){
+  if (!cfg.endpoint) return; // empty endpoint = self-check version — local save above already worked
+  const ctx = answerCtx();
+  const payload = { key: SHEET_KEY, studentId, group: studentGroup };
+  TASK.answerFields.forEach(f=>{
+    const applicable = !f.showIf || f.showIf(ctx);
+    payload[f.id+'_ref'] = applicable ? f.ref(ctx) : null;
+    const av = ansValues[f.id];
+    payload[f.id+'_ans'] = (av==null || isNaN(av)) ? null : av;
+  });
+  try{
+    // Apps Script Web Apps don't return CORS headers, so the response is opaque
+    // (mode:'no-cors') — this can confirm the request was sent, not that it succeeded server-side.
+    // keepalive:true — so the request isn't aborted if the student closes the tab
+    // or navigates away right after clicking the button.
+    await fetch(cfg.endpoint, {
+      method:'POST', mode:'no-cors', keepalive:true,
+      headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body: JSON.stringify(payload)
+    });
+    showToast(t('sentToSheet'), false);
+  }catch(e){
+    showToast(t('sentToSheetFail'), true);
+  }
+}
+async function loadAnswer(id){
+  try{ const r = await storageGet(ANSWERS_PREFIX+id); return r ? JSON.parse(r.value) : null; }
+  catch(e){ return null; }
+}
+async function loadAllResults(){
+  try{
+    const list = await storageList(RESULTS_PREFIX);
+    if (!list || !list.keys) return [];
+    const out = [];
+    for(const k of list.keys){
+      try{ const r = await storageGet(k); if (r) out.push(JSON.parse(r.value)); }catch(e){}
+    }
+    for(const item of out){ item.answer = await loadAnswer(item.id); }
+    return out.sort((a,b)=> (a.group||'').localeCompare(b.group||'') || a.id.localeCompare(b.id));
+  }catch(e){ return []; }
+}
+
+// accepts both "," and "." as decimal separator (common mix-up for non-English-locale students)
+function parseNum(str){
+  if (str==null) return NaN;
+  return parseFloat(String(str).trim().replace(',', '.'));
+}
+
+// ---------- niceNum for axis ticks ----------
+function niceNum(range, round){
+  const exp = Math.floor(Math.log10(range));
+  const f = range/Math.pow(10,exp);
+  let nf;
+  if (round){
+    if (f<1.5) nf=1; else if (f<3) nf=2; else if (f<7) nf=5; else nf=10;
+  } else {
+    if (f<=1) nf=1; else if (f<=2) nf=2; else if (f<=5) nf=5; else nf=10;
+  }
+  return nf*Math.pow(10,exp);
+}
+
+// ---------- drawing (fully generic: two numeric arrays, no notion of meaning) ----------
+function drawPanel(canvas, xArr, yArr, opts){
+  const W = canvas.width, H = canvas.height;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle = "#f0f0f0";
+  ctx.fillRect(0,0,W,H);
+
+  const padL=48, padR=14, padT=14, padB=26;
+  const plotW = W-padL-padR, plotH = H-padT-padB;
+
+  const lo = opts.lo ?? 0, hi = opts.hi ?? (xArr.length-1);
+  const xMin = xArr[lo], xMaxV = xArr[hi];
+  const xSpan = (xMaxV-xMin) || 1;
+
+  let yMax = 0;
+  for(let i=lo;i<=hi;i++){ const a=Math.abs(yArr[i]); if(a>yMax) yMax=a; }
+  yMax *= 1.15;
+  if (yMax===0) yMax=1;
+
+  const xToPx = v => padL + ((v-xMin)/xSpan)*plotW;
+  const yToPx = v => padT + plotH/2 - (v/yMax)*(plotH/2);
+
+  ctx.strokeStyle = "#d3d3d3"; ctx.lineWidth=1;
+  ctx.font = "10px Tahoma"; ctx.fillStyle="#555";
+  const xStep = niceNum(xSpan/10, true);
+  const xStart = Math.ceil(xMin/xStep)*xStep;
+  for(let xv=xStart; xv<=xMaxV+1e-9; xv+=xStep){
+    const x = xToPx(xv);
+    ctx.beginPath(); ctx.moveTo(x,padT); ctx.lineTo(x,H-padB); ctx.stroke();
+    ctx.fillText(xv.toFixed(xStep<0.01?4:(xStep<0.1?3:2)), x-10, H-padB+14);
+  }
+  const yStep = niceNum(yMax/6, true);
+  for(let yv=-Math.ceil(yMax/yStep)*yStep; yv<=yMax; yv+=yStep){
+    const y = yToPx(yv);
+    if (y<padT-2 || y>H-padB+2) continue;
+    ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(W-padR,y); ctx.stroke();
+    ctx.fillText(yv.toFixed(Math.abs(yv)<10?1:0), 4, y+3);
+  }
+  ctx.strokeStyle="#333"; ctx.lineWidth=1.2;
+  const y0 = yToPx(0);
+  ctx.beginPath(); ctx.moveTo(padL,y0); ctx.lineTo(W-padR,y0); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(padL,padT); ctx.lineTo(padL,H-padB); ctx.stroke();
+
+  ctx.strokeStyle = opts.color; ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  for(let i=lo;i<=hi;i++){
+    const x = xToPx(xArr[i]), y = yToPx(yArr[i]);
+    if (i===lo) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+
+  ctx.fillStyle = "#00000090";
+  pinned.forEach(p=>{
+    if (p.idx<lo || p.idx>hi) return;
+    const x = xToPx(xArr[p.idx]), y = yToPx(yArr[p.idx]);
+    ctx.beginPath(); ctx.arc(x,y,3.2,0,7); ctx.fill();
+  });
+
+  if (cursorIdx!=null && cursorIdx>=lo && cursorIdx<=hi){
+    const x = xToPx(xArr[cursorIdx]), y = yToPx(yArr[cursorIdx]);
+    ctx.strokeStyle = "#4466cc88"; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(x,padT); ctx.lineTo(x,H-padB); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(W-padR,y); ctx.stroke();
+    ctx.fillStyle = opts.color;
+    ctx.beginPath(); ctx.arc(x,y,3.5,0,7); ctx.fill();
+  }
+
+  if (opts.dragSel){
+    const x1v = xArr[opts.dragSel.a], x2v = xArr[opts.dragSel.b];
+    const x1 = xToPx(Math.min(x1v,x2v)), x2 = xToPx(Math.max(x1v,x2v));
+    ctx.fillStyle = "rgba(50,110,220,0.15)";
+    ctx.fillRect(x1, padT, x2-x1, plotH);
+    ctx.strokeStyle = "rgba(50,110,220,0.6)"; ctx.lineWidth=1;
+    ctx.strokeRect(x1, padT, x2-x1, plotH);
+  }
+
+  return {padL,padR,padT,padB,plotW,plotH,xMin,xMaxV,yMax,xToPx,yToPx};
+}
+
+// ---------- zoom (shared across all panels — same sample index range) ----------
+let zoomLo = 0, zoomHi = null;
+let dragging = false, dragStartIdx = null, dragCurIdx = null, dragStartClientX = null;
+
+function zoomRange(){
+  if (!sim) return [0,0];
+  return zoomHi!=null ? [zoomLo, zoomHi] : [0, sim.t.length-1];
+}
+function resetZoom(){ zoomLo = 0; zoomHi = null; redraw(); }
+function pixelToIdx(canvas, clientX){
+  const rect = canvas.getBoundingClientRect();
+  const xRatio = (clientX-rect.left)/rect.width;
+  const padL=48/1600, padR=14/1600;
+  const usable = 1-padL-padR;
+  let frac = (xRatio-padL)/usable;
+  frac = Math.min(1, Math.max(0, frac));
+  const [lo,hi] = zoomRange();
+  return Math.round(lo + frac*(hi-lo));
+}
+
+// ---------- app state / render ----------
+let els = {};
+
+function render(){
+  document.documentElement.lang = uiLang;
+  const panelsHtml = TASK.panels.map((p,i)=>`
+    <div class="win">
+      <div class="titlebar"><span class="ico" style="background:${p.color}"></span><span class="name">${p.title} <span class="readout-inline" id="panelReadout_${i}" style="color:${p.color};">—</span></span>
+        <div class="win-btn">—</div><div class="win-btn">▢</div><div class="win-btn">✕</div>
+      </div>
+      <div class="plotwrap">
+        <canvas id="panelCanvas_${i}" width="1600" height="380"></canvas>
+      </div>
+    </div>`).join('');
+
+  root.innerHTML = `
+    <div class="toprow">
+      <input type="text" id="studentId" placeholder="${t('idPlaceholder')}" maxlength="20" value="${studentId.replace(/"/g,'')}"/>
+      <input type="text" id="groupId" placeholder="${t('groupPlaceholder')}" maxlength="5" value="${studentGroup.replace(/"/g,'')}"/>
+      <button class="btn" id="startBtn">${t('startBtn')}</button>
+      <span class="small" id="zoomTag" style="display:none;cursor:pointer;color:#2255aa;text-decoration:underline;">${t('resetZoom')}</span>
+      ${teacherMode ? `<button class="btn" id="peekBtn">${t('peekBtn')}</button>` : ``}
+      <div class="rightGroup">
+        <span class="langsw" id="langSwitch">
+          <button type="button" class="langbtn" id="langBtn">${LANG_LABELS[uiLang]} ▾</button>
+          <div class="langmenu" id="langMenu">
+            ${LANGS.map(l=>`<a data-lang="${l}">${LANG_LABELS[l]}</a>`).join('')}
+          </div>
+        </span>
+        <div class="gear" id="gearBtn" title="${t('gearTitle')}">⚙</div>
+      </div>
+    </div>
+    ${teacherMode && peekOpen && sim ? `
+    <div class="win" style="padding:8px 12px;font-size:12.5px;background:#fff8dc;">
+      <b>${t('teacherModeTitle', studentGroup? studentGroup+' / ':'', studentId||'—')}</b><br/>
+      ${TASK.params.map(p=> `${p.id} = ${fmtNum(params[p.id])} ${p.unit}`).join(',&nbsp; ')}<br/>
+      ${TASK.answerFields.filter(f=> !(new Set(TASK.params.map(p=>p.id))).has(f.id) && (!f.showIf || f.showIf(answerCtx()))).map(f=>
+        `${f.shortLabel||f.id} = ${fmtNum(f.ref(answerCtx()))} ${f.unit||''}`).join(',&nbsp; ')}
+    </div>` : ``}
+
+    ${panelsHtml}
+
+    <div class="points-panel">
+      <div class="ptools">
+        <b style="font-size:13px;">${t('pinnedPointsTitle')}</b>
+        <button class="btn" id="clearPts">${t('clearBtn')}</button>
+        <button class="btn" id="copyPts">${t('copyBtn')}</button>
+      </div>
+      <table>
+        <thead><tr id="ptsHeadRow"></tr></thead>
+        <tbody id="ptsBody"></tbody>
+      </table>
+    </div>
+
+    <div class="points-panel" id="answerPanel"></div>
+  `;
+
+  els.studentId = document.getElementById('studentId');
+  els.groupId = document.getElementById('groupId');
+  els.startBtn = document.getElementById('startBtn');
+  els.gearBtn = document.getElementById('gearBtn');
+  els.zoomTag = document.getElementById('zoomTag');
+  els.zoomTag.onclick = resetZoom;
+  els.langSwitch = document.getElementById('langSwitch');
+  const langBtn = document.getElementById('langBtn');
+  const langMenu = document.getElementById('langMenu');
+  els.ptsHeadRow = document.getElementById('ptsHeadRow');
+  els.ptsBody = document.getElementById('ptsBody');
+  els.panels = TASK.panels.map((p,i)=>({
+    def:p,
+    canvas: document.getElementById('panelCanvas_'+i),
+    readout: document.getElementById('panelReadout_'+i)
+  }));
+
+  els.startBtn.onclick = onStart;
+  els.gearBtn.onclick = ()=> teacherMode ? openConfigModal() : openTeacherModal();
+  document.getElementById('clearPts').onclick = ()=>{ pinned=[]; redraw(); };
+  document.getElementById('copyPts').onclick = copyPointsTable;
+  const peekBtn = document.getElementById('peekBtn');
+  if (peekBtn) peekBtn.onclick = ()=>{ peekOpen = !peekOpen; render(); };
+  langBtn.onclick = (e)=>{ e.stopPropagation(); els.langSwitch.classList.toggle('open'); };
+  langMenu.querySelectorAll('a').forEach(a=>{
+    if (a.dataset.lang===uiLang) a.classList.add('active');
+    a.onclick = ()=>{
+      uiLang = a.dataset.lang;
+      storageSet(LANG_KEY, uiLang);
+      render();
+    };
+  });
+
+  els.panels.forEach(p=> attachCanvasEvents(p.canvas));
+  attachGlobalMouseUp();
+  attachLangMenuOutsideClick();
+
+  redraw();
+  renderAnswerPanel();
+}
+
+function fmtNum(v){
+  if (v==null || isNaN(v)) return '—';
+  const a = Math.abs(v);
+  return v.toFixed(a<1?4:(a<100?2:1));
+}
+
+function attachCanvasEvents(canvas){
+  function handlePos(clientX){
+    if (!sim) return;
+    cursorIdx = pixelToIdx(canvas, clientX);
+    redraw();
+  }
+  canvas.addEventListener('mousemove', e=>{
+    if (dragging){ dragCurIdx = pixelToIdx(canvas, e.clientX); redraw(); }
+    else handlePos(e.clientX);
+  });
+  canvas.addEventListener('mouseleave', ()=>{ if (!dragging){ cursorIdx=null; redraw(); } });
+  canvas.addEventListener('mousedown', e=>{
+    if (!sim) return;
+    e.preventDefault();
+    dragging = true;
+    dragStartIdx = pixelToIdx(canvas, e.clientX);
+    dragCurIdx = dragStartIdx;
+    dragStartClientX = e.clientX;
+  });
+  canvas.addEventListener('dblclick', ()=>{ if (sim) resetZoom(); });
+
+  let lastTapTime = 0;
+  canvas.addEventListener('touchstart', e=>{
+    if (!sim) return;
+    e.preventDefault();
+    const touch = e.touches[0];
+    if (!touch) return;
+    const now = Date.now();
+    if (now - lastTapTime < 350){
+      dragging = false; dragStartIdx=null; dragCurIdx=null;
+      resetZoom();
+      lastTapTime = 0;
+      return;
+    }
+    lastTapTime = now;
+    dragging = true;
+    dragStartIdx = pixelToIdx(canvas, touch.clientX);
+    dragCurIdx = dragStartIdx;
+    dragStartClientX = touch.clientX;
+  }, {passive:false});
+  canvas.addEventListener('touchmove', e=>{
+    e.preventDefault();
+    if (!sim || !e.touches[0]) return;
+    if (dragging){ dragCurIdx = pixelToIdx(canvas, e.touches[0].clientX); redraw(); }
+    else handlePos(e.touches[0].clientX);
+  }, {passive:false});
+}
+
+function finishDrag(clientX){
+  if (!dragging) return;
+  dragging = false;
+  if (!sim){ dragStartIdx=null; dragCurIdx=null; return; }
+  const pixelDist = Math.abs(clientX - dragStartClientX);
+  if (pixelDist < 5){
+    cursorIdx = dragStartIdx;
+    pinned.push({idx: cursorIdx});
+    renderPointsTable();
+  } else if (dragStartIdx!=null && dragCurIdx!=null && dragStartIdx!==dragCurIdx){
+    let lo = Math.min(dragStartIdx, dragCurIdx), hi = Math.max(dragStartIdx, dragCurIdx);
+    if (hi-lo < 4) hi = Math.min(sim.t.length-1, lo+4);
+    zoomLo = lo; zoomHi = hi;
+  }
+  dragStartIdx = null; dragCurIdx = null;
+  redraw();
+}
+
+let langMenuOutsideClickAttached = false;
+function attachLangMenuOutsideClick(){
+  if (langMenuOutsideClickAttached) return;
+  langMenuOutsideClickAttached = true;
+  document.addEventListener('click', (e)=>{
+    const sw = document.getElementById('langSwitch');
+    if (sw && !sw.contains(e.target)) sw.classList.remove('open');
+  });
+}
+
+let globalMouseUpAttached = false;
+function attachGlobalMouseUp(){
+  if (globalMouseUpAttached) return;
+  globalMouseUpAttached = true;
+  window.addEventListener('mouseup', e=> finishDrag(e.clientX));
+  window.addEventListener('touchend', e=>{
+    const t = e.changedTouches && e.changedTouches[0];
+    finishDrag(t ? t.clientX : dragStartClientX);
+  });
+  window.addEventListener('touchcancel', ()=>{ dragging=false; dragStartIdx=null; dragCurIdx=null; });
+}
+
+function redraw(){
+  if (!sim){
+    els.panels && els.panels.forEach(p=>{
+      const c = p.canvas, ctx = c.getContext('2d');
+      ctx.fillStyle="#f0f0f0"; ctx.fillRect(0,0,c.width,c.height);
+      ctx.fillStyle="#888"; ctx.font="16px Tahoma";
+      ctx.fillText(t('canvasHint'), 30, c.height/2);
+    });
+    return;
+  }
+  const [lo,hi] = zoomRange();
+  const dragSel = (dragging && dragStartIdx!=null && dragCurIdx!=null && dragStartIdx!==dragCurIdx)
+    ? {a:dragStartIdx, b:dragCurIdx} : null;
+
+  els.panels.forEach(p=>{
+    const def = p.def;
+    const xScale = def.xScale||1, yScale = def.yScale||1;
+    const xArr = sim.series[def.x].map(v=>v*xScale);
+    const yArr = sim.series[def.y].map(v=>v*yScale);
+    drawPanel(p.canvas, xArr, yArr, {color:def.color, lo, hi, dragSel});
+    if (cursorIdx!=null){
+      p.readout.innerHTML = `— ${def.yLabel}: ${yArr[cursorIdx].toFixed(def.yDecimals??2)} ${def.yUnit};&nbsp;&nbsp;${def.xLabel}: ${xArr[cursorIdx].toFixed(def.xDecimals??4)} ${def.xUnit}`;
+    } else {
+      p.readout.innerHTML = `— ${def.yLabel}: —&nbsp;${def.yUnit};&nbsp;&nbsp;${def.xLabel}: — ${def.xUnit}`;
+    }
+  });
+
+  if (els.zoomTag) els.zoomTag.style.display = (zoomHi!=null) ? 'inline' : 'none';
+  renderPointsTable();
+  // IMPORTANT: renderAnswerPanel() is deliberately NOT called here — otherwise every
+  // cursor move over the graph would rebuild the input fields and wipe answers the
+  // student already typed. It's only called from render() (once, on start/panel
+  // switch) and from onStart().
+}
+
+function seriesIds(){
+  return Object.keys(sim.series);
+}
+
+function renderPointsTable(){
+  const ids = seriesIds();
+  els.ptsHeadRow.innerHTML = '<th>#</th>' + ids.map(id=>{
+    const m = seriesMeta(id);
+    return `<th>${m.label}${m.unit?', '+m.unit:''}</th>`;
+  }).join('');
+  els.ptsBody.innerHTML = pinned.map((p,i)=>{
+    const cells = ids.map(id=>{
+      const m = seriesMeta(id);
+      const v = sim.series[id][p.idx]*m.scale;
+      return `<td>${v.toFixed(m.decimals)}</td>`;
+    }).join('');
+    return `<tr><td>${i+1}</td>${cells}</tr>`;
+  }).join('');
+}
+
+function copyPointsTable(){
+  if (!sim || !pinned.length){ return; }
+  const ids = seriesIds();
+  const header = ids.map(id=>{ const m=seriesMeta(id); return `${m.label}${m.unit?', '+m.unit:''}`; }).join("\t")+"\n";
+  const body = pinned.map(p=> ids.map(id=>{
+    const m = seriesMeta(id);
+    return (sim.series[id][p.idx]*m.scale).toFixed(m.decimals);
+  }).join("\t")).join("\n");
+  const text = header+body;
+  navigator.clipboard?.writeText(text).catch(()=>{
+    const ta = document.createElement('textarea');
+    ta.value=text; document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); document.body.removeChild(ta);
+  });
+}
+
+async function onStart(){
+  const id = els.studentId.value.trim();
+  if (!id){
+    // ID is optional by design (not blocked) — empty runs are allowed after
+    // an explicit confirm, and flow through the exact same generation
+    // scheme with an empty string (no separate "anonymous" seed logic).
+    const proceed = confirm(t('anonConfirm'));
+    if (!proceed){ els.studentId.focus(); return; }
+  }
+  studentId = id;
+  studentGroup = els.groupId.value.trim();
+  const r = runSimulation(id);
+  params = r.P;
+  sim = r.sim;
+  pinned = [];
+  cursorIdx = null;
+  zoomLo = 0; zoomHi = null;
+  redraw();
+  renderAnswerPanel();
+  const ok = await saveResult(id, params, sim);
+  if (ok) showToast(t('measurementStarted'), false);
+}
+
+// ---------- checking one answer: percentage or angular (isAngle) ----------
+function checkOneField(f, val, ref){
+  if (isNaN(val)) return {ok:false, text:`${f.label.split(',')[0]}: ${t('notSpecified')}`};
+  if (f.isAngle){
+    const d = angDiff(val, ref);
+    const tol = f.angleTolDeg ?? cfg.phaseTol ?? 10;
+    const ok = d<=tol;
+    return {ok, text:`${f.label.split(',')[0]}: ${val}° ${ok?'✅':'❌'} ${t('deviationDeg', d.toFixed(0), tol)}`};
+  }
+  const err = Math.abs(val-ref)/Math.abs(ref)*100;
+  const ok = err <= (f.tolerancePct ?? 15);
+  return {ok, text:`${f.label.split(',')[0]}: ${val} ${f.unit||''} ${ok?'✅':'❌'} ${t('deviationPct', err.toFixed(0))}`};
+}
+
+function renderAnswerPanel(){
+  const box = document.getElementById('answerPanel');
+  if (!box) return;
+  if (!sim){ box.innerHTML = ""; return; }
+  const ctx = answerCtx();
+  const visibleFields = TASK.answerFields.filter(f=>!f.showIf || f.showIf(ctx));
+  box.innerHTML = `
+    <b style="font-size:13px;">${t('yourAnswerTitle')}</b>
+    <div class="row2">
+      ${visibleFields.map(f=>`<div><label>${f.label}</label><input id="ans_${f.id}" type="text" placeholder="${f.placeholder||''}"></div>`).join('')}
+    </div>
+    <button class="btn" id="submitAns">${t('checkBtn')}</button>
+    <div id="ansFeedback" style="margin-top:8px;font-size:13px;"></div>
+  `;
+  document.getElementById('submitAns').onclick = async ()=>{
+    const ansValues = {};
+    visibleFields.forEach(f=>{ ansValues[f.id] = parseNum(document.getElementById('ans_'+f.id).value); });
+    // NOTE: checks !sim, not !studentId — studentId can legitimately be an
+    // empty string for an anonymous run, which is falsy and would otherwise
+    // wrongly look like "no measurement started yet".
+    if (!sim){ alert(t('startFirst')); return; }
+    const ok = await saveAnswer(studentId, ansValues);
+    await sendToSheet(ansValues);
+    const fb = document.getElementById('ansFeedback');
+    const rows = visibleFields.map(f=>{
+      const r = checkOneField(f, ansValues[f.id], f.ref(ctx));
+      return `<div style="color:${r.ok?'#0a7a1f':'#b30000'};">${r.text}</div>`;
+    });
+    let footer;
+    if (cfg.endpoint){
+      footer = ok
+        ? `<div class="small" style="margin-top:4px;">${t('answerSentNote')}</div>`
+        : `<div class="small" style="margin-top:4px;color:#b30000;">${t('answerSendFailedNote')}</div>`;
+    } else {
+      footer = `<div class="small" style="margin-top:4px;">${t('selfCheckNote')}</div>`;
+    }
+    fb.innerHTML = rows.join('') + footer;
+  };
+}
+
+// ---------- teacher access key ----------
+function openTeacherModal(){
+  const bg = document.createElement('div');
+  bg.className='modal-bg';
+  bg.innerHTML = `
+    <div class="modal">
+      <h3>${t('teacherPanelTitle')}</h3>
+      <input type="text" id="keyInput" placeholder="${t('keyPlaceholder')}" style="width:100%;padding:6px;border:1px solid #999;border-radius:3px;"/>
+      <div class="actions">
+        <button class="btn" id="keyCancel">${t('cancelBtn')}</button>
+        <button class="btn" id="keyOk">${t('enterBtn')}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(bg);
+  document.getElementById('keyCancel').onclick=()=>bg.remove();
+  document.getElementById('keyOk').onclick=()=>{
+    const v = document.getElementById('keyInput').value;
+    if (v === cfg.key){ teacherMode = true; bg.remove(); render(); openConfigModal(); }
+    else alert(t('wrongKey'));
+  };
+}
+
+// ---------- parameter range settings ----------
+function openConfigModal(){
+  const bg = document.createElement('div');
+  bg.className='modal-bg';
+  const paramRows = TASK.params.map(p=>{
+    const r = cfg.paramRanges[p.id] || {min:p.min, max:p.max};
+    return `
+        <div><label>${p.label} min, ${p.unit}</label><input id="pmin_${p.id}" value="${r.min}"></div>
+        <div><label>${p.label} max, ${p.unit}</label><input id="pmax_${p.id}" value="${r.max}"></div>`;
+  }).join('');
+  const hasAngleField = TASK.answerFields.some(f=>f.isAngle);
+  bg.innerHTML = `
+    <div class="modal">
+      <h3>${t('settingsTitle')}</h3>
+      <div class="row2">
+        ${paramRows}
+        ${hasAngleField ? `<div><label>${t('phaseTolLabel')}</label><input id="phaseTol" value="${cfg.phaseTol}"></div>` : ``}
+        <div><label>${t('newKeyLabel')}</label><input id="key" value="${cfg.key}"></div>
+        <div style="grid-column:1/-1;"><label>${t('endpointLabel')}</label><input id="endpoint" value="${cfg.endpoint||''}" placeholder="https://script.google.com/macros/s/.../exec"></div>
+      </div>
+      <div class="actions">
+        <button class="btn" id="showResults">${t('showResultsBtn')}</button>
+        <button class="btn" id="cfgCancel">${t('closeBtn')}</button>
+        <button class="btn" id="cfgSave">${t('saveBtn')}</button>
+      </div>
+      <div id="resultsArea"></div>
+    </div>`;
+  document.body.appendChild(bg);
+  document.getElementById('cfgCancel').onclick=()=>{ bg.remove(); render(); };
+  document.getElementById('cfgSave').onclick=async ()=>{
+    const paramRanges = {};
+    TASK.params.forEach(p=>{
+      paramRanges[p.id] = {
+        min: parseNum(document.getElementById('pmin_'+p.id).value),
+        max: parseNum(document.getElementById('pmax_'+p.id).value)
+      };
+    });
+    const newCfg = {
+      paramRanges,
+      phaseTol: hasAngleField ? parseNum(document.getElementById('phaseTol').value) : cfg.phaseTol,
+      key: document.getElementById('key').value || cfg.key,
+      endpoint: document.getElementById('endpoint').value.trim()
+    };
+    const ok = await saveConfig(newCfg);
+    if (ok) alert(t('savedAlert'));
+    bg.remove();
+    render();
+  };
+  document.getElementById('showResults').onclick= async ()=>{
+    const area = document.getElementById('resultsArea');
+    area.innerHTML = t('loadingText');
+    const results = await loadAllResults();
+    if (!results.length){ area.innerHTML = `<p class='small'>${t('noResultsText')}</p>`; return; }
+    function fmtAns(f, val, ref){
+      if (val==null || isNaN(val)) return `<span class="small">${t('notSubmitted')}</span>`;
+      if (ref==null) return val;
+      const r = checkOneField(f, val, ref);
+      return `<span style="color:${r.ok?'#0a7a1f':'#b30000'};">${val} ${r.ok?'✅':'❌'}</span>`;
+    }
+    const headCells = TASK.answerFields.map(f=>`<th>${f.shortLabel||f.id} ${t('givenSuffix')}</th><th>${f.shortLabel||f.id} ${t('answerSuffix')}</th>`).join('');
+    area.innerHTML = `
+      <table class="resulttable">
+        <thead><tr><th>${t('groupCol')}</th><th>${t('studentCol')}</th>${headCells}</tr></thead>
+        <tbody>
+          ${results.map(r=>{
+            const ctx = {params:r.params, derived:r.derived||{}};
+            const cells = TASK.answerFields.map(f=>{
+              const applicable = !f.showIf || f.showIf(ctx);
+              const ref = applicable ? f.ref(ctx) : null;
+              const ans = r.answer?.values?.[f.id];
+              return `<td>${ref!=null?fmtNum(ref):'—'}</td><td>${applicable?fmtAns(f, ans, ref):'—'}</td>`;
+            }).join('');
+            return `<tr><td>${r.group||''}</td><td>${r.id}</td>${cells}</tr>`;
+          }).join('')}
+        </tbody>
+      </table>`;
+  };
+}
+
+// ---------- init ----------
+(async function init(){
+  document.title = TASK.title;
+  attachGlobalMouseUp();
+  await loadConfig();
+  try{
+    const r = await storageGet(LANG_KEY);
+    if (r && LANGS.includes(r.value)) uiLang = r.value;
+  }catch(e){}
+  render();
+})();
+
+})();
+</script>
+</body>
+</html>
