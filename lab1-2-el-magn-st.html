@@ -802,12 +802,16 @@ function render(){
   const peekBtn = document.getElementById('peekBtn');
   if (peekBtn) peekBtn.onclick = ()=>{ peekOpen = !peekOpen; render(); };
   const sizeRange = document.getElementById('sizeRange');
+  // While dragging only the % label follows the thumb; the width is applied on
+  // release ("change") — otherwise the slider itself would move under the cursor.
   sizeRange.oninput = ()=>{
-    uiSize = +sizeRange.value;
-    document.getElementById('sizeVal').textContent = uiSize + '%';
-    applySize();
+    document.getElementById('sizeVal').textContent = sizeRange.value + '%';
   };
-  sizeRange.onchange = ()=> storageSet(SIZE_KEY, String(uiSize));
+  sizeRange.onchange = ()=>{
+    uiSize = +sizeRange.value;
+    applySize();
+    storageSet(SIZE_KEY, String(uiSize));
+  };
   langBtn.onclick = (e)=>{ e.stopPropagation(); els.langSwitch.classList.toggle('open'); };
   langMenu.querySelectorAll('a').forEach(a=>{
     if (a.dataset.lang===uiLang) a.classList.add('active');
