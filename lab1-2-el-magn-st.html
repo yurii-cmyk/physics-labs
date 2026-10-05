@@ -15,6 +15,7 @@
   border-radius:6px;
   color:#111;
   max-width:100%;
+  margin:0 auto;
 }
 .toprow{
   display:flex; gap:10px; align-items:center; flex-wrap:wrap;
@@ -74,6 +75,9 @@ canvas{ display:block; width:100%; height:auto; cursor:crosshair; touch-action:n
 .resulttable th, .resulttable td{ border:1px solid #ccc; padding:3px 6px; }
 .resulttable th{ background:#e2e2e2; }
 .hint{ font-size:12px; color:#555; margin-bottom:8px; }
+.sizectl{ display:flex; align-items:center; gap:5px; font-size:12.5px; color:#333; }
+.sizectl input[type=range]{ width:110px; margin:0; cursor:pointer; }
+.sizectl .sizeval{ min-width:36px; text-align:right; font-variant-numeric:tabular-nums; }
 .langsw{ position:relative; font-size:12.5px; }
 .langsw .langbtn{
   padding:6px 10px; border:1px solid #999; border-radius:3px; background:linear-gradient(#fdfdfd,#e2e2e2);
@@ -226,11 +230,14 @@ const ANSWERS_PREFIX = TASK.id + ":answer:";
 const LS_PREFIX = 'physlab-sim:' + TASK.id + ':';
 const SHEET_KEY = 'engine-' + TASK.id; // must match ACCESS_KEY in the Apps Script
 const LANG_KEY = TASK.id + ":lang";
+const SIZE_KEY = TASK.id + ":size";
+const SIZE_MIN = 40, SIZE_MAX = 100, SIZE_STEP = 5; // app width, % of the browser window
 
 // ---------- UI language: engine chrome only, never TASK content ----------
 const LANGS = ['en','uk','es'];
 const LANG_LABELS = { en:'English', uk:'Українська', es:'Español' }; // shown in the picker regardless of current uiLang
 let uiLang = 'en';
+let uiSize = SIZE_MAX;
 
 const STRINGS = {
   en: {
@@ -240,6 +247,7 @@ const STRINGS = {
     resetZoom: '🔍 Reset zoom',
     peekBtn: '👁 Current experiment parameters',
     gearTitle: 'Teacher settings',
+    sizeTitle: 'Window size',
     teacherModeTitle: (g,id)=>`Teacher mode — current experiment parameters (${g}${id}):`,
     pinnedPointsTitle: 'Pinned points',
     clearBtn: 'Clear',
@@ -290,6 +298,7 @@ const STRINGS = {
     resetZoom: '🔍 Скинути масштаб',
     peekBtn: '👁 Параметри поточного досліду',
     gearTitle: 'Налаштування викладача',
+    sizeTitle: 'Розмір вікна',
     teacherModeTitle: (g,id)=>`Режим викладача — параметри поточного досліду (${g}${id}):`,
     pinnedPointsTitle: 'Зняті точки',
     clearBtn: 'Очистити',
@@ -340,6 +349,7 @@ const STRINGS = {
     resetZoom: '🔍 Restablecer zoom',
     peekBtn: '👁 Parámetros del experimento actual',
     gearTitle: 'Configuración del profesor',
+    sizeTitle: 'Tamaño de la ventana',
     teacherModeTitle: (g,id)=>`Modo profesor — parámetros del experimento actual (${g}${id}):`,
     pinnedPointsTitle: 'Puntos fijados',
     clearBtn: 'Borrar',
@@ -706,8 +716,11 @@ function pixelToIdx(canvas, clientX){
 // ---------- app state / render ----------
 let els = {};
 
+function applySize(){ root.style.width = uiSize + '%'; }
+
 function render(){
   document.documentElement.lang = uiLang;
+  applySize();
   const panelsHtml = TASK.panels.map((p,i)=>`
     <div class="win">
       <div class="titlebar"><span class="ico" style="background:${p.color}"></span><span class="name">${p.title} <span class="readout-inline" id="panelReadout_${i}" style="color:${p.color};">—</span></span>
@@ -726,6 +739,11 @@ function render(){
       <span class="small" id="zoomTag" style="display:none;cursor:pointer;color:#2255aa;text-decoration:underline;">${t('resetZoom')}</span>
       ${teacherMode ? `<button class="btn" id="peekBtn">${t('peekBtn')}</button>` : ``}
       <div class="rightGroup">
+        <label class="sizectl" title="${t('sizeTitle')}">
+          <span>⤢</span>
+          <input type="range" id="sizeRange" min="${SIZE_MIN}" max="${SIZE_MAX}" step="${SIZE_STEP}" value="${uiSize}" aria-label="${t('sizeTitle')}"/>
+          <span class="sizeval" id="sizeVal">${uiSize}%</span>
+        </label>
         <span class="langsw" id="langSwitch">
           <button type="button" class="langbtn" id="langBtn">${LANG_LABELS[uiLang]} ▾</button>
           <div class="langmenu" id="langMenu">
@@ -783,6 +801,13 @@ function render(){
   document.getElementById('copyPts').onclick = copyPointsTable;
   const peekBtn = document.getElementById('peekBtn');
   if (peekBtn) peekBtn.onclick = ()=>{ peekOpen = !peekOpen; render(); };
+  const sizeRange = document.getElementById('sizeRange');
+  sizeRange.oninput = ()=>{
+    uiSize = +sizeRange.value;
+    document.getElementById('sizeVal').textContent = uiSize + '%';
+    applySize();
+  };
+  sizeRange.onchange = ()=> storageSet(SIZE_KEY, String(uiSize));
   langBtn.onclick = (e)=>{ e.stopPropagation(); els.langSwitch.classList.toggle('open'); };
   langMenu.querySelectorAll('a').forEach(a=>{
     if (a.dataset.lang===uiLang) a.classList.add('active');
@@ -1152,6 +1177,11 @@ function openConfigModal(){
   try{
     const r = await storageGet(LANG_KEY);
     if (r && LANGS.includes(r.value)) uiLang = r.value;
+  }catch(e){}
+  try{
+    const r = await storageGet(SIZE_KEY);
+    const v = r ? parseInt(r.value, 10) : NaN;
+    if (v>=SIZE_MIN && v<=SIZE_MAX) uiSize = v;
   }catch(e){}
   render();
 })();
