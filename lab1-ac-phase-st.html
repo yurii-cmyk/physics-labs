@@ -22,7 +22,7 @@
 .pv-section{ font-family:"Segoe UI", Tahoma, Arial, sans-serif; font-size:13px; font-weight:600; color:#333; margin:4px 2px 8px; }
 </style>
 
-<div id="phasorView" data-fit-end>
+<div id="phasorView">
   <div class="pv-frame"><canvas id="pvCanvas" width="1920" height="1080"></canvas></div>
   <div class="pv-row">
     <button class="btn" id="pvPlay">▶ Play</button>
@@ -450,9 +450,10 @@ canvas{ display:block; width:100%; height:auto; cursor:crosshair; touch-action:n
 .langsw .langmenu a:hover{ background:#eef2fa; }
 .langsw .langmenu a.active{ background:#2255aa; color:#fff; }
 .widthctl{ display:flex; align-items:center; gap:5px; font-size:12.5px; white-space:nowrap; }
-.widthctl input[type=range]{ width:90px; }
-.widthctl .widthval{ min-width:36px; font-variant-numeric:tabular-nums; }
-.widthctl .btn.widthfit{ padding:4px 8px; font-size:12px; }
+.widthctl input[type=range]{ width:90px; margin:0; cursor:pointer; }
+.widthctl .widthval{ min-width:36px; text-align:right; font-variant-numeric:tabular-nums; }
+.widthctl .btn.widthfit{ padding:4px 7px; display:inline-flex; align-items:center; }
+.widthctl .btn.widthfit svg{ display:block; }
 .widthctl .btn.widthfit.on{ background:#cfe0ff; border-color:#2255aa; }
 </style>
 
@@ -558,12 +559,7 @@ const DEFAULT_CFG = {
   paramRanges: Object.fromEntries(TASK.params.map(p=>[p.id, {min:p.min, max:p.max}])),
   phaseTol: 10,   // ° — global tolerance for isAngle fields (unless a field sets its own)
   key: "teacher123",
-  endpoint: "", // "" = public self-check version; a Sheet /exec URL = student version (see comment above)
-  // Page width control (engine 1.1). Default width of the trainer as % of the
-  // browser window (40–100), or "fit" = shrink to fit the screen height.
-  // Each viewer can change it with the ↔ slider; their choice is remembered
-  // in their own browser. Remove this line to hide the control entirely.
-  pageWidth: 70
+  endpoint: "" // "" = public self-check version; a Sheet /exec URL = student version (see comment above)
 };
 
 /* ==========================================================================
@@ -599,24 +595,8 @@ const DEFAULT_CFG = {
        for settings and "Current experiment parameters"; anonymous run via
        confirm() on empty ID; en/uk/es UI switcher (engine chrome only).
        First lab built on it: lab5-resonance.html.
-
-   1.1 (2026-10-05) — optional page width control, ON when DEFAULT_CFG has
-       pageWidth (a number 40–100 = % of window width, or "fit"); a config
-       without pageWidth behaves exactly like 1.0. Page content is wrapped in
-       <div id="labPage"> (falls back to #app if absent). The ↔ slider + "Fit"
-       button render into #widthSlot if the page has one (e.g. a task-specific
-       block above #app), otherwise into the top row. "Fit" sizes the page so
-       everything down to [data-fit-end] (default: the last graph panel) fits
-       the window height, recomputed on resize/F11. The viewer's choice is a
-       per-browser preference in localStorage (key physlab-sim:pageWidth,
-       shared by the whole series). Prompted by lab1-ac-phase (laptop screens).
-
-   1.1.1 (2026-10-05) — fix: the width slider resizes the page only when the
-       mouse button is released ('change'); during the drag only the % label
-       updates. Live resizing moved the slider out from under the cursor.
-       Prompted by lab1-ac-phase.
    -------------------------------------------------------------------------- */
-const ENGINE_VERSION = '1.1.1';
+const ENGINE_VERSION = '1.0';
 
 const ADC_BITS = 16; // instrument ADC resolution — engine constant, not a task parameter
 
@@ -642,6 +622,9 @@ const STRINGS = {
     resetZoom: '🔍 Reset zoom',
     peekBtn: '👁 Current experiment parameters',
     gearTitle: 'Teacher settings',
+    widthLabel: 'Page width',
+    fitTitle: 'Full screen',
+    fitExitTitle: 'Exit full screen',
     teacherModeTitle: (g,id)=>`Teacher mode — current experiment parameters (${g}${id}):`,
     pinnedPointsTitle: 'Pinned points',
     clearBtn: 'Clear',
@@ -683,10 +666,7 @@ const STRINGS = {
     groupCol: 'Group',
     studentCol: 'Student',
     givenSuffix: 'given',
-    answerSuffix: 'answer',
-    widthLabel: 'Page width',
-    fitBtn: 'Fit',
-    fitTitle: 'Fit to screen height'
+    answerSuffix: 'answer'
   },
   uk: {
     idPlaceholder: 'Ідентифікатор студента',
@@ -695,6 +675,9 @@ const STRINGS = {
     resetZoom: '🔍 Скинути масштаб',
     peekBtn: '👁 Параметри поточного досліду',
     gearTitle: 'Налаштування викладача',
+    widthLabel: 'Ширина сторінки',
+    fitTitle: 'На весь екран',
+    fitExitTitle: 'Вийти з повноекранного режиму',
     teacherModeTitle: (g,id)=>`Режим викладача — параметри поточного досліду (${g}${id}):`,
     pinnedPointsTitle: 'Зняті точки',
     clearBtn: 'Очистити',
@@ -736,10 +719,7 @@ const STRINGS = {
     groupCol: 'Група',
     studentCol: 'Студент',
     givenSuffix: 'задане',
-    answerSuffix: 'відповідь',
-    widthLabel: 'Ширина сторінки',
-    fitBtn: 'Вмістити',
-    fitTitle: 'Вмістити за висотою екрана'
+    answerSuffix: 'відповідь'
   },
   es: {
     idPlaceholder: 'Identificador del estudiante',
@@ -748,6 +728,9 @@ const STRINGS = {
     resetZoom: '🔍 Restablecer zoom',
     peekBtn: '👁 Parámetros del experimento actual',
     gearTitle: 'Configuración del profesor',
+    widthLabel: 'Ancho de la página',
+    fitTitle: 'Pantalla completa',
+    fitExitTitle: 'Salir de pantalla completa',
     teacherModeTitle: (g,id)=>`Modo profesor — parámetros del experimento actual (${g}${id}):`,
     pinnedPointsTitle: 'Puntos fijados',
     clearBtn: 'Borrar',
@@ -789,10 +772,7 @@ const STRINGS = {
     groupCol: 'Grupo',
     studentCol: 'Estudiante',
     givenSuffix: 'dado',
-    answerSuffix: 'respuesta',
-    widthLabel: 'Ancho de la página',
-    fitBtn: 'Ajustar',
-    fitTitle: 'Ajustar a la altura de la pantalla'
+    answerSuffix: 'respuesta'
   }
 };
 function t(key, ...args){
@@ -1114,102 +1094,77 @@ function pixelToIdx(canvas, clientX){
   return Math.round(lo + frac*(hi-lo));
 }
 
-// ---------- page width control (1.1, optional — see DEFAULT_CFG.pageWidth) ----------
-// Per-viewer screen preference, deliberately in plain localStorage (never
-// window.storage shared:true) and shared by the whole series.
+// ---------- page width control + full screen ----------
+// Per-viewer screen preference, deliberately in plain localStorage and shared
+// by the whole series.
 const WIDTH_LS_KEY = 'physlab-sim:pageWidth';
-let widthEnabled = false;
-let widthMode = 70;        // number (%) or 'fit'
-let widthPctShown = 70;    // actual % applied (computed in 'fit' mode)
+const WIDTH_MIN = 40, WIDTH_MAX = 100, WIDTH_STEP = 5; // % of the browser window
+let widthPct = 70;
+try{
+  const n = parseFloat(localStorage.getItem(WIDTH_LS_KEY));
+  if (n>=WIDTH_MIN && n<=WIDTH_MAX) widthPct = Math.round(n/WIDTH_STEP)*WIDTH_STEP;
+}catch(e){}
 
-function loadWidthPref(){
-  try{
-    const v = localStorage.getItem(WIDTH_LS_KEY);
-    if (v === 'fit') return 'fit';
-    const n = parseFloat(v);
-    if (n>=40 && n<=100) return n;
-  }catch(e){}
-  return null;
-}
-function saveWidthPref(){
-  try{ localStorage.setItem(WIDTH_LS_KEY, String(widthMode)); }catch(e){}
-}
 function pageEl(){ return document.getElementById('labPage') || root; }
-function setPageWidth(page, pct){ page.style.width = `max(min(100%, 600px), ${pct}%)`; }
-
-// 'fit': canvases scale with width, everything else has (almost) fixed height,
-// so solve for the width at which the bottom of the fit-end element touches
-// the bottom of the window. A few iterations absorb text re-wrapping.
-function computeFitPct(page){
-  let endEl = document.querySelector('[data-fit-end]');
-  if (!endEl){ const w = root.querySelectorAll('.win'); endEl = w[w.length-1]; }
-  const avail = page.parentElement ? page.parentElement.clientWidth : 0;
-  if (!endEl || !avail) return 100;
-  let pct = widthPctShown || 100;
-  for(let k=0;k<3;k++){
-    setPageWidth(page, pct);
-    const w = page.getBoundingClientRect().width;
-    const bottom = endEl.getBoundingClientRect().bottom + window.scrollY;
-    let hc = 0;
-    page.querySelectorAll('canvas').forEach(c=>{
-      const r = c.getBoundingClientRect();
-      if (r.height>0 && r.bottom + window.scrollY <= bottom + 1) hc += r.height;
-    });
-    if (!hc) break;
-    const target = window.innerHeight - 8;
-    const newW = w * (target - (bottom - hc)) / hc;
-    pct = Math.max(30, Math.min(100, newW/avail*100));
-  }
-  return pct;
-}
 function applyWidth(){
-  if (!widthEnabled) return;
   const page = pageEl();
   page.style.marginLeft = 'auto'; page.style.marginRight = 'auto';
-  widthPctShown = (widthMode === 'fit') ? computeFitPct(page) : widthMode;
-  setPageWidth(page, widthPctShown);
-  const v = document.getElementById('widthVal');
-  if (v) v.textContent = Math.round(widthPctShown)+'%';
-  const r = document.getElementById('widthRange');
-  if (r && widthMode === 'fit') r.value = Math.round(widthPctShown);
+  page.style.width = `max(min(100%, 600px), ${widthPct}%)`;
 }
+
+// "Fit" toggles browser full screen (same as F11: no tabs, no address bar).
+function fsElement(){ return document.fullscreenElement || document.webkitFullscreenElement || null; }
+function fsSupported(){ return !!(document.fullscreenEnabled || document.webkitFullscreenEnabled); }
+function toggleFullscreen(){
+  const d = document, el = d.documentElement;
+  try{
+    const p = fsElement()
+      ? (d.exitFullscreen || d.webkitExitFullscreen).call(d)
+      : (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+    if (p && p.catch) p.catch(()=>{});
+  }catch(e){}
+}
+// Icon shows what a click will do: corners pointing out = go full screen,
+// corners pointing in = back to the normal browser window.
+const fsIcon = d=>`<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`;
+const FS_ICON_ENTER = fsIcon('M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4');
+const FS_ICON_EXIT  = fsIcon('M6 2v4H2M14 6h-4V2M10 14v-4h4M2 10h4v4');
+function syncFitBtn(){
+  const b = document.getElementById('widthFit');
+  if (!b) return;
+  const fs = !!fsElement();
+  b.classList.toggle('on', fs);
+  b.innerHTML = fs ? FS_ICON_EXIT : FS_ICON_ENTER;
+  b.title = t(fs ? 'fitExitTitle' : 'fitTitle');
+  b.setAttribute('aria-label', b.title);
+}
+document.addEventListener('fullscreenchange', syncFitBtn);
+document.addEventListener('webkitfullscreenchange', syncFitBtn);
+
 function renderWidthControl(){
-  if (!widthEnabled) return;
   const slot = document.getElementById('widthSlot') || document.getElementById('widthSlotTop');
   if (!slot) return;
-  const shown = Math.round(widthPctShown);
   slot.innerHTML = `<span class="widthctl">
       <span title="${t('widthLabel')}">↔</span>
-      <input type="range" id="widthRange" min="40" max="100" step="5" value="${shown}" title="${t('widthLabel')}">
-      <span class="widthval" id="widthVal">${shown}%</span>
-      <button type="button" class="btn widthfit${widthMode==='fit'?' on':''}" id="widthFit" title="${t('fitTitle')}">${t('fitBtn')}</button>
+      <input type="range" id="widthRange" min="${WIDTH_MIN}" max="${WIDTH_MAX}" step="${WIDTH_STEP}" value="${widthPct}" title="${t('widthLabel')}" aria-label="${t('widthLabel')}">
+      <span class="widthval" id="widthVal">${widthPct}%</span>
+      ${fsSupported() ? `<button type="button" class="btn widthfit" id="widthFit"></button>` : ``}
     </span>`;
-  const fitBtn = document.getElementById('widthFit');
   const range = document.getElementById('widthRange');
   // While dragging only the % label follows the thumb; the page is resized
   // once, on release ('change'). Resizing live moves the slider itself out
   // from under the cursor (it sits inside the page) and breaks the drag.
-  range.oninput = e=>{
-    document.getElementById('widthVal').textContent = Math.round(e.target.value)+'%';
+  range.oninput = ()=>{
+    document.getElementById('widthVal').textContent = range.value + '%';
   };
-  range.onchange = e=>{
-    widthMode = parseFloat(e.target.value);
-    fitBtn.classList.remove('on');
-    applyWidth(); saveWidthPref();
+  range.onchange = ()=>{
+    widthPct = +range.value;
+    applyWidth();
+    try{ localStorage.setItem(WIDTH_LS_KEY, String(widthPct)); }catch(e){}
   };
-  fitBtn.onclick = ()=>{
-    widthMode = (widthMode === 'fit') ? Math.round(widthPctShown/5)*5 : 'fit';
-    fitBtn.classList.toggle('on', widthMode === 'fit');
-    applyWidth(); saveWidthPref();
-  };
-}
-function initWidth(){
-  if (cfg.pageWidth == null) return; // feature off — identical to engine 1.0
-  widthEnabled = true;
-  const pref = loadWidthPref();
-  widthMode = pref != null ? pref : cfg.pageWidth;
-  widthPctShown = (widthMode === 'fit') ? 100 : widthMode;
-  window.addEventListener('resize', ()=>{ if (widthMode === 'fit') applyWidth(); });
+  const fitBtn = document.getElementById('widthFit');
+  if (fitBtn) fitBtn.onclick = toggleFullscreen;
+  syncFitBtn();
 }
 
 // ---------- app state / render ----------
@@ -1235,7 +1190,6 @@ function render(){
       <span class="small" id="zoomTag" style="display:none;cursor:pointer;color:#2255aa;text-decoration:underline;">${t('resetZoom')}</span>
       ${teacherMode ? `<button class="btn" id="peekBtn">${t('peekBtn')}</button>` : ``}
       <div class="rightGroup">
-        ${widthEnabled && !document.getElementById('widthSlot') ? `<span id="widthSlotTop"></span>` : ``}
         <span class="langsw" id="langSwitch">
           <button type="button" class="langbtn" id="langBtn">${LANG_LABELS[uiLang]} ▾</button>
           <div class="langmenu" id="langMenu">
@@ -1665,7 +1619,6 @@ function openConfigModal(){
     const r = await storageGet(LANG_KEY);
     if (r && LANGS.includes(r.value)) uiLang = r.value;
   }catch(e){}
-  initWidth();
   render();
 })();
 

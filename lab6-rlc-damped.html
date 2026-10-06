@@ -88,6 +88,12 @@ canvas{ display:block; width:100%; height:auto; cursor:crosshair; touch-action:n
 .langsw .langmenu a{ display:block; padding:7px 12px; color:#222; text-decoration:none; cursor:pointer; white-space:nowrap; }
 .langsw .langmenu a:hover{ background:#eef2fa; }
 .langsw .langmenu a.active{ background:#2255aa; color:#fff; }
+.widthctl{ display:flex; align-items:center; gap:5px; font-size:12.5px; white-space:nowrap; }
+.widthctl input[type=range]{ width:90px; margin:0; cursor:pointer; }
+.widthctl .widthval{ min-width:36px; text-align:right; font-variant-numeric:tabular-nums; }
+.widthctl .btn.widthfit{ padding:4px 7px; display:inline-flex; align-items:center; }
+.widthctl .btn.widthfit svg{ display:block; }
+.widthctl .btn.widthfit.on{ background:#cfe0ff; border-color:#2255aa; }
 </style>
 
 <script>
@@ -313,6 +319,9 @@ const STRINGS = {
     resetZoom: '🔍 Reset zoom',
     peekBtn: '👁 Current experiment parameters',
     gearTitle: 'Teacher settings',
+    widthLabel: 'Page width',
+    fitTitle: 'Full screen',
+    fitExitTitle: 'Exit full screen',
     teacherModeTitle: (g,id)=>`Teacher mode — current experiment parameters (${g}${id}):`,
     pinnedPointsTitle: 'Pinned points',
     clearBtn: 'Clear',
@@ -363,6 +372,9 @@ const STRINGS = {
     resetZoom: '🔍 Скинути масштаб',
     peekBtn: '👁 Параметри поточного досліду',
     gearTitle: 'Налаштування викладача',
+    widthLabel: 'Ширина сторінки',
+    fitTitle: 'На весь екран',
+    fitExitTitle: 'Вийти з повноекранного режиму',
     teacherModeTitle: (g,id)=>`Режим викладача — параметри поточного досліду (${g}${id}):`,
     pinnedPointsTitle: 'Зняті точки',
     clearBtn: 'Очистити',
@@ -413,6 +425,9 @@ const STRINGS = {
     resetZoom: '🔍 Restablecer zoom',
     peekBtn: '👁 Parámetros del experimento actual',
     gearTitle: 'Configuración del profesor',
+    widthLabel: 'Ancho de la página',
+    fitTitle: 'Pantalla completa',
+    fitExitTitle: 'Salir de pantalla completa',
     teacherModeTitle: (g,id)=>`Modo profesor — parámetros del experimento actual (${g}${id}):`,
     pinnedPointsTitle: 'Puntos fijados',
     clearBtn: 'Borrar',
@@ -776,6 +791,79 @@ function pixelToIdx(canvas, clientX){
   return Math.round(lo + frac*(hi-lo));
 }
 
+// ---------- page width control + full screen ----------
+// Per-viewer screen preference, deliberately in plain localStorage and shared
+// by the whole series.
+const WIDTH_LS_KEY = 'physlab-sim:pageWidth';
+const WIDTH_MIN = 40, WIDTH_MAX = 100, WIDTH_STEP = 5; // % of the browser window
+let widthPct = 100;
+try{
+  const n = parseFloat(localStorage.getItem(WIDTH_LS_KEY));
+  if (n>=WIDTH_MIN && n<=WIDTH_MAX) widthPct = Math.round(n/WIDTH_STEP)*WIDTH_STEP;
+}catch(e){}
+
+function pageEl(){ return document.getElementById('labPage') || root; }
+function applyWidth(){
+  const page = pageEl();
+  page.style.marginLeft = 'auto'; page.style.marginRight = 'auto';
+  page.style.width = `max(min(100%, 600px), ${widthPct}%)`;
+}
+
+// "Fit" toggles browser full screen (same as F11: no tabs, no address bar).
+function fsElement(){ return document.fullscreenElement || document.webkitFullscreenElement || null; }
+function fsSupported(){ return !!(document.fullscreenEnabled || document.webkitFullscreenEnabled); }
+function toggleFullscreen(){
+  const d = document, el = d.documentElement;
+  try{
+    const p = fsElement()
+      ? (d.exitFullscreen || d.webkitExitFullscreen).call(d)
+      : (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+    if (p && p.catch) p.catch(()=>{});
+  }catch(e){}
+}
+// Icon shows what a click will do: corners pointing out = go full screen,
+// corners pointing in = back to the normal browser window.
+const fsIcon = d=>`<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`;
+const FS_ICON_ENTER = fsIcon('M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4');
+const FS_ICON_EXIT  = fsIcon('M6 2v4H2M14 6h-4V2M10 14v-4h4M2 10h4v4');
+function syncFitBtn(){
+  const b = document.getElementById('widthFit');
+  if (!b) return;
+  const fs = !!fsElement();
+  b.classList.toggle('on', fs);
+  b.innerHTML = fs ? FS_ICON_EXIT : FS_ICON_ENTER;
+  b.title = t(fs ? 'fitExitTitle' : 'fitTitle');
+  b.setAttribute('aria-label', b.title);
+}
+document.addEventListener('fullscreenchange', syncFitBtn);
+document.addEventListener('webkitfullscreenchange', syncFitBtn);
+
+function renderWidthControl(){
+  const slot = document.getElementById('widthSlot') || document.getElementById('widthSlotTop');
+  if (!slot) return;
+  slot.innerHTML = `<span class="widthctl">
+      <span title="${t('widthLabel')}">↔</span>
+      <input type="range" id="widthRange" min="${WIDTH_MIN}" max="${WIDTH_MAX}" step="${WIDTH_STEP}" value="${widthPct}" title="${t('widthLabel')}" aria-label="${t('widthLabel')}">
+      <span class="widthval" id="widthVal">${widthPct}%</span>
+      ${fsSupported() ? `<button type="button" class="btn widthfit" id="widthFit"></button>` : ``}
+    </span>`;
+  const range = document.getElementById('widthRange');
+  // While dragging only the % label follows the thumb; the page is resized
+  // once, on release ('change'). Resizing live moves the slider itself out
+  // from under the cursor (it sits inside the page) and breaks the drag.
+  range.oninput = ()=>{
+    document.getElementById('widthVal').textContent = range.value + '%';
+  };
+  range.onchange = ()=>{
+    widthPct = +range.value;
+    applyWidth();
+    try{ localStorage.setItem(WIDTH_LS_KEY, String(widthPct)); }catch(e){}
+  };
+  const fitBtn = document.getElementById('widthFit');
+  if (fitBtn) fitBtn.onclick = toggleFullscreen;
+  syncFitBtn();
+}
+
 // ---------- app state / render ----------
 let els = {};
 
@@ -799,6 +887,7 @@ function render(){
       <span class="small" id="zoomTag" style="display:none;cursor:pointer;color:#2255aa;text-decoration:underline;">${t('resetZoom')}</span>
       ${teacherMode ? `<button class="btn" id="peekBtn">${t('peekBtn')}</button>` : ``}
       <div class="rightGroup">
+        <span id="widthSlotTop"></span>
         <span class="langsw" id="langSwitch">
           <button type="button" class="langbtn" id="langBtn">${LANG_LABELS[uiLang]} ▾</button>
           <div class="langmenu" id="langMenu">
@@ -872,6 +961,8 @@ function render(){
 
   redraw();
   renderAnswerPanel();
+  renderWidthControl();
+  applyWidth();
 }
 
 function fmtNum(v){
